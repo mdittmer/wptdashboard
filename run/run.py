@@ -14,16 +14,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import argparse
 import ConfigParser as configparser
+import argparse
+import calendar
 import gzip
+import iso8601
 import json
+import os
 import platform as host_platform
 import re
 import requests
 import subprocess
 import sys
-import os
+
+from google.protobuf.json_format import MessageToJson
+from protos.test_summary_pb2 import TestSummary
 
 """
 run.py runs WPT and uploads results to Google Cloud Storage.
@@ -115,6 +120,7 @@ def main(platform_id, platform, args, config):
 
     # TODO(#40): modify this to test against the first SHA of the day
     CURRENT_WPT_SHA = get_current_wpt_sha(config)
+    CURRENT_WPT_COMMIT_TIME = get_current_wpt_commit_time(config)
     print('Current WPT SHA: %s' % CURRENT_WPT_SHA)
 
     SHORT_SHA = CURRENT_WPT_SHA[0:10]
@@ -190,11 +196,13 @@ def main(platform_id, platform, args, config):
     assert len(report['results']) > 0, (
         '0 test results, something went wrong, stopping.')
 
-    summary = report_to_summary(report)
+    summary = report_to_summary(CURRENT_WPT_SHA,
+                                CURRENT_WPT_COMMIT_TIME,
+                                report)
 
     print('==================================================')
     print('Writing summary.json.gz to local filesystem')
-    write_gzip_json(LOCAL_SUMMARY_GZ_FILEPATH, summary)
+    write_gzip_proto_list(LOCAL_SUMMARY_GZ_FILEPATH, summary)
     print('Wrote file %s' % LOCAL_SUMMARY_GZ_FILEPATH)
 
     print('==================================================')
@@ -301,27 +309,49 @@ def get_current_wpt_sha(config):
     assert len(sha) == 40, 'Invalid SHA: "%s"' % sha
     return sha
 
+def get_current_wpt_commit_time(config):
+    command = ['git', 'log', '-n1', '--pretty=format:%aI']
+    output = subprocess.check_output(command, cwd=config['wpt_path'])
+    time_str = output.decode('UTF-8').strip()
+    date = iso8601.parse_date(output)
+    seconds = calendar.timegm(date)
+    return seconds
 
-def report_to_summary(wpt_report):
-    test_files = {}
+
+def report_to_summary(sha, commit_time, wpt_report):
+    test_files = []
 
     for result in wpt_report['results']:
-        test_file = result['test']
-        assert test_file not in test_files, (
-            'Assumption that each test_file only shows up once broken!')
+        test_file_name = result['test']
+        assert test_file_name not in [
+            test_file.name for test_file in test_files
+        ], ('Assumption that each test_file only shows up once broken!')
 
+        summary = TestSummary(long_wpt_hash=sha,
+                              wpt_commit_time=commit_time,
+                              name=test_file_name)
         if result['status'] in ('OK', 'PASS'):
-            test_files[test_file] = [1, 1]
+            summary.num_tests_passed = 1
+            summary.num_tests_total = 1
         else:
-            test_files[test_file] = [0, 1]
+            summary.num_tests_passed = 0
+            summary.num_tests_total = 1
 
         for subtest in result['subtests']:
             if subtest['status'] == 'PASS':
-                test_files[test_file][0] += 1
+                summary.num_tests_passed += 1
 
-            test_files[test_file][1] += 1
+            summary.num_tests_total += 1
 
+        test_files.append(summary)
     return test_files
+
+
+def proto_to_bq_tuple(message, schema):
+    t = ()
+    for field in schema:
+        t += (getattr(message, field['name']),)
+    return t
 
 
 def write_gzip_json(filepath, payload):
@@ -332,6 +362,17 @@ def write_gzip_json(filepath, payload):
 
     with gzip.open(filepath, 'wb') as f:
         payload_str = json.dumps(payload)
+        f.write(payload_str)
+
+
+def write_gzip_proto_list(filepath, payload):
+    try:
+        os.makedirs(os.path.dirname(filepath))
+    except OSError:
+        pass
+
+    with gzip.open(filepath, 'wb') as f:
+        payload_str = [MessageToJson(msg) for msg in payload]
         f.write(payload_str)
 
 
