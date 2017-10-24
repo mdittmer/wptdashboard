@@ -5,14 +5,12 @@
 # Successful run of install.sh
 #
 
-set -ev
+set -e
 
 source $(readlink -f $(dirname "${0}"))/env.sh
 
-PROTOS_IN_DIR="protos"
-PYTHON_OUT_DIR="run/protos"
+PROTOS_IN_DIR="${BASE_DIR}/protos"
 BQ_SCHEMA_IN_DIR="${BQ_SCHEMA_GEN_DIR}"
-BQ_SCHEMA_OUT_DIR="bq-schema"
 
 mkdir -p "${PYTHON_OUT_DIR}"
 mkdir -p "${BQ_SCHEMA_OUT_DIR}"
