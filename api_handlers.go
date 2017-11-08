@@ -18,9 +18,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"google.golang.org/appengine"
-	"google.golang.org/appengine/datastore"
 	"net/url"
+
+	"google.golang.org/appengine"
 )
 
 // apiTestRunsHandler is responsible for emitting test-run JSON for all the runs at a given SHA.
@@ -34,7 +34,6 @@ func apiTestRunsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := appengine.NewContext(r)
 	var browserNames []string
 	browserNames, err = GetBrowserNames()
 	if err != nil {
@@ -42,20 +41,11 @@ func apiTestRunsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var testRuns []TestRun
-	baseQuery := datastore.NewQuery("TestRun").Order("-CreatedAt").Limit(1)
-
-	for _, browserName := range browserNames {
-		var testRunResults []TestRun
-		query := baseQuery.Filter("BrowserName =", browserName)
-		if runSHA != "" && runSHA != "latest" {
-			query = query.Filter("Revision =", runSHA)
-		}
-		if _, err := query.GetAll(ctx, &testRunResults); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		testRuns = append(testRuns, testRunResults...)
+	ctx := appengine.NewContext(r)
+	testRuns, err := TestRunsForShaAndBrowsers(ctx, runSHA, browserNames)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	testRunsBytes, err := json.Marshal(testRuns)
@@ -91,28 +81,18 @@ func apiTestRunHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := appengine.NewContext(r)
-
-	query := datastore.
-		NewQuery("TestRun").
-		Order("-CreatedAt").
-		Limit(1).
-		Filter("BrowserName =", browserName)
-	if runSHA != "" && runSHA != "latest" {
-		query = query.Filter("Revision =", runSHA)
-	}
-
-	var testRuns []TestRun
-	if _, err := query.GetAll(ctx, &testRuns); err != nil {
+	testRun, err := TestRunsForShaAndBrowser(ctx, runSHA, browserName)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if len(testRuns) == 0 {
+	if testRun == nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	testRunsBytes, err := json.Marshal(testRuns[0])
+	testRunsBytes, err := json.Marshal(*testRun)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
