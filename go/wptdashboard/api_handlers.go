@@ -20,8 +20,11 @@ import (
 
 	"net/url"
 
+	"cloud.google.com/go/datastore"
 	"google.golang.org/appengine"
 )
+
+const projectId = "wptdashboard"
 
 // apiTestRunsHandler is responsible for emitting test-run JSON for all the runs at a given SHA.
 //
@@ -42,7 +45,13 @@ func apiTestRunsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := appengine.NewContext(r)
-	testRuns, err := TestRunsForShaAndBrowsers(ctx, runSHA, browserNames)
+	client, err := datastore.NewClient(ctx, projectId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	testRuns, err := TestRunsForShaAndBrowsers(ctx, client, runSHA, browserNames)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -81,7 +90,13 @@ func apiTestRunHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := appengine.NewContext(r)
-	testRun, err := TestRunsForShaAndBrowser(ctx, runSHA, browserName)
+	client, err := datastore.NewClient(ctx, projectId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	testRun, err := TestRunsForShaAndBrowser(ctx, client, runSHA, browserName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

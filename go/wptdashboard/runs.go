@@ -15,29 +15,36 @@
 package wptdashboard
 
 import (
+	"cloud.google.com/go/datastore"
 	"golang.org/x/net/context"
-	"google.golang.org/appengine/datastore"
+	"google.golang.org/api/iterator"
 )
 
-func TestRunsForShaAndBrowsers(ctx context.Context, runSHA string, browserNames []string) (testRuns []TestRun, err error) {
+func TestRunsForShaAndBrowsers(ctx context.Context, client *datastore.Client, runSHA string, browserNames []string) (testRuns []TestRun, err error) {
 	baseQuery := datastore.NewQuery("TestRun").Order("-CreatedAt").Limit(1)
 
 	for _, browserName := range browserNames {
-		var testRunResults []TestRun
 		query := baseQuery.Filter("BrowserName =", browserName)
 		if runSHA != "" && runSHA != "latest" {
 			query = query.Filter("Revision =", runSHA)
 		}
-		if _, err := query.GetAll(ctx, &testRunResults); err != nil {
-			return testRuns, err
+		for i := client.Run(ctx, query); ; {
+			var testRun TestRun
+			_, err := i.Next(&testRun)
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return testRuns, err
+			}
+			testRuns = append(testRuns, testRun)
 		}
-		testRuns = append(testRuns, testRunResults...)
 	}
 
 	return testRuns, nil
 }
 
-func TestRunsForShaAndBrowser(ctx context.Context, runSHA string, browserName string) (testRun *TestRun, err error) {
+func TestRunsForShaAndBrowser(ctx context.Context, client *datastore.Client, runSHA string, browserName string) (testRun *TestRun, err error) {
 	query := datastore.
 		NewQuery("TestRun").
 		Order("-CreatedAt").
@@ -47,14 +54,17 @@ func TestRunsForShaAndBrowser(ctx context.Context, runSHA string, browserName st
 		query = query.Filter("Revision =", runSHA)
 	}
 
-	var testRuns []TestRun
-	if _, err := query.GetAll(ctx, &testRuns); err != nil {
-		return nil, err
+	for i := client.Run(ctx, query); ; {
+		var testRun TestRun
+		_, err := i.Next(&testRun)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return &testRun, err
+		}
+		return &testRun, nil
 	}
 
-	if len(testRuns) == 0 {
-		return nil, nil
-	}
-
-	return &testRuns[0], nil
+	return nil, nil
 }
