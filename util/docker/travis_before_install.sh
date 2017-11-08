@@ -2,8 +2,9 @@
 
 set -e
 
-DOCKER_DIR=$(readlink -f $(dirname "$0"))
-WPTDASHBOARD_DIR=${WPTDASHBOARD_DIR:-$(readlink -f "${DOCKER_DIR}/../..")}
+DOCKER_DIR=$(dirname "$0")
+source "${DOCKER_DIR}/../path.sh"
+WPTDASHBOARD_DIR=${WPTDASHBOARD_DIR:-$(absdir "${DOCKER_DIR}/../..")}
 
 cd "${WPTDASHBOARD_DIR}"
 
