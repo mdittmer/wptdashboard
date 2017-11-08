@@ -17,7 +17,6 @@ package wptdashboard
 import (
 	"encoding/json"
 	"net/http"
-
 	"net/url"
 
 	"cloud.google.com/go/datastore"
