@@ -25,25 +25,35 @@ BQ_LIB=${BQ_LIB:-"../protoc-gen-bq-schema"}
 BQ_OUT=${BQ_OUT:-"./bq-schema"}
 PY_OUT=${PY_OUT:-"./run/protos"}
 GO_OUT=${GO_OUT:-"./go/wptdashboard/protos"}
+# TODO: Use GoogleCloudPlatform/mdittmer/protoc-gen-bq-schema after
+# https://github.com/GoogleCloudPlatform/protoc-gen-bq-schema/pull/4
+# lands
+GO_PKGMAP=${GO_PKGMAP:-"Mbq_table_name.proto=github.com/mdittmer/protoc-gen-bq-schema/protos"}
 
 mkdir -p "${BQ_OUT}"
 mkdir -p "${PY_OUT}"
 mkdir -p "${GO_OUT}"
 
+sleep 1
+
 function compile_protos() {
-  if protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
+  info "START: Regen from protos"
+  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
       --bq-schema_out="${BQ_OUT}" \
-      "${PROTOS}"/*.proto && \
-      protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
-      --python_out="${PY_OUT}" \
-      "${BQ_LIB}"/*.proto "${PROTOS}"/*.proto && \
-      protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
-      --go_out="${GO_OUT}" \
       "${PROTOS}"/*.proto; then
-    info "SUCCESS: Regen from protos"
-  else
-    error "FAILURE: Regen from protos failed"
+    error "FAILURE: Regen BigQuery schema from protos failed"
   fi
+  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
+      --python_out="${PY_OUT}" \
+      "${BQ_LIB}"/*.proto "${PROTOS}"/*.proto; then
+    error "FAILURE: Regen Python code from protos failed"
+  fi
+  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
+      --go_out="${GO_PKGMAP}:${GO_OUT}" \
+      "${PROTOS}"/*.proto; then
+    error "FAILURE: Regen Go code from protos failed"
+  fi
+  info "FINISH: Regen from protos"
 }
 
 compile_protos

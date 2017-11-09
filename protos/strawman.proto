@@ -14,7 +14,8 @@
 
 syntax = "proto3";
 
-package w3c.wptdashboard;
+package wptdashboard.protos;
+option go_package = "protos";
 import "bq_table_name.proto";
 
 message Strawman {
