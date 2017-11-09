@@ -23,6 +23,9 @@ WPTDASHBOARD_HOST_WEB_PORT=${WPTDASHBOARD_HOST_WEB_PORT:-"8080"}
 
 info "Creating docker instance for dev server"
 docker run --rm -it -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro \
-    -v "${WPTDASHBOARD_DIR}":/wptdashboard -u $(id -u $USER):$(id -g $USER) \
+  -v "${WPTDASHBOARD_DIR}":/wptdashboard \
+  -v "${WPTDASHBOARD_DIR}/go/wptdashboard":/go/src/wptdashboard \
+  -v "${WPTDASHBOARD_DIR}/go/main":/go/src/main \
+  -u $(id -u $USER):$(id -g $USER) \
     -p "${WPTDASHBOARD_HOST_WEB_PORT}:8080" \
     --name wptd-dev-instance wptd-dev /wptdashboard/util/docker/inner/watch.sh

@@ -78,9 +78,5 @@ RUN gcloud components install \
     app-engine-python \
     kubectl
 
-# Put wptdashboard code in GOPATH
-RUN ln -s "/wptdashboard/go/wptdashboard" "/go/src/wptdashboard"
-RUN ln -s "/wptdashboard/go/main" "/go/src/main"
-
 # Drop dev environment into source path
 WORKDIR /wptdashboard
