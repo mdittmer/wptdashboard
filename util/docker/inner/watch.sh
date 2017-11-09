@@ -24,9 +24,11 @@ PROTOS=${PROTOS:-"./protos"}
 BQ_LIB=${BQ_LIB:-"../protoc-gen-bq-schema"}
 BQ_OUT=${BQ_OUT:-"./bq-schema"}
 PY_OUT=${PY_OUT:-"./run/protos"}
+GO_OUT=${GO_OUT:-"./go/wptdashboard/protos"}
 
 mkdir -p "${BQ_OUT}"
 mkdir -p "${PY_OUT}"
+mkdir -p "${GO_OUT}"
 
 function compile_protos() {
   if protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
@@ -34,7 +36,10 @@ function compile_protos() {
       "${PROTOS}"/*.proto && \
       protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
       --python_out="${PY_OUT}" \
-      "${BQ_LIB}"/*.proto "${PROTOS}"/*.proto; then
+      "${BQ_LIB}"/*.proto "${PROTOS}"/*.proto && \
+      protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
+      --go_out="${GO_OUT}" \
+      "${PROTOS}"/*.proto; then
     info "SUCCESS: Regen from protos"
   else
     error "FAILURE: Regen from protos failed"
