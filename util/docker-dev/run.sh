@@ -35,6 +35,8 @@ docker run -t -d --entrypoint /bin/bash \
 docker exec -u 0:0 wptd-dev-instance \
     chown -R $(id -u $USER):$(id -g $USER) /go
 docker exec -u 0:0 wptd-dev-instance \
+    chown -R $(id -u $USER):$(id -g $USER) /home/jenkins
+docker exec -u 0:0 wptd-dev-instance \
     chown -R $(id -u $USER):$(id -g $USER) /wptdashboard
 
 docker exec -it -u $(id -u $USER):$(id -g $USER) wptd-dev-instance \
