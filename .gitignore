@@ -3,4 +3,6 @@ node_modules
 run/running.ini
 .DS_Store
 run/protos/*_pb2.py
+go/wptdashboard/protos/*.pb.go
+go/main
 bq-schema
