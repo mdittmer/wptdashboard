@@ -12,6 +12,7 @@ set -e
 
 DOCKER_INNER_DIR=$(dirname "$0")
 source "${DOCKER_INNER_DIR}/../../logging.sh"
+WPTDASHBOARD_DIR="${DOCKER_INNER_DIR}/../../.."
 
 function stop() {
   warn "watch.sh: Recieved interrupt. Exiting..."
@@ -37,23 +38,13 @@ mkdir -p "${GO_OUT}"
 sleep 1
 
 function compile_protos() {
-  info "START: Regen from protos"
-  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
-      --bq-schema_out="${BQ_OUT}" \
-      "${PROTOS}"/*.proto; then
-    error "FAILURE: Regen BigQuery schema from protos failed"
+  pushd "${WPTDASHBOARD_DIR}" > /dev/null
+  if make proto; then
+    info "SUCCESS: Regen from protos"
+  else
+    error "FAILURE: Regen from protos failed"
   fi
-  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
-      --python_out="${PY_OUT}" \
-      "${BQ_LIB}"/*.proto "${PROTOS}"/*.proto; then
-    error "FAILURE: Regen Python code from protos failed"
-  fi
-  if ! protoc -I"${PB_LIB}" -I"${BQ_LIB}" -I"${PROTOS}" \
-      --go_out="${GO_PKGMAP}:${GO_OUT}" \
-      "${PROTOS}"/*.proto; then
-    error "FAILURE: Regen Go code from protos failed"
-  fi
-  info "FINISH: Regen from protos"
+  popd > /dev/null
 }
 
 compile_protos
