@@ -5,4 +5,4 @@ source "${DOCKER_DIR}/../logging.sh"
 WPTDASHBOARD_DIR=${WPTDASHBOARD_DIR:-"${DOCKER_DIR}/../.."}
 
 info "Ensuring application-default credentials"
-"${DOCKER_DIR}/su_i_exec.sh" /wptdashboard/util/docker/inner/dev_auth.sh
+docker exec -it -u 0:0 wptd-dev-instance /wptdashboard/util/docker-dev/inner/dev_auth.sh
