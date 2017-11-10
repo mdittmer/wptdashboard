@@ -43,14 +43,17 @@ go_test: go_deps
 	go test -v ./...
 
 bq_proto: $(PROTOS)
+	mkdir -p $(PB_BQ_OUT_DIR)
 	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
 		--bq-schema_out=$(PB_BQ_OUT_DIR) $(PROTOS)
 
 py_proto: $(PROTOS)
+	mkdir -p $(PB_PY_OUT_DIR)
 	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
 		--python_out=$(PB_PY_OUT_DIR) $(PROTOS)
 
 go_proto: $(PROTOS)
+	mkdir -p $(PB_GO_OUT_DIR)
 	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
 		--go_out=$(PB_GO_PKG_MAP):$(PB_GO_OUT_DIR) $(PROTOS)
 
