@@ -17,6 +17,8 @@ PB_BQ_LIB_DIR ?= ../protoc-gen-bq-schema
 PB_LOCAL_LIB_DIR ?= protos
 PB_BQ_OUT_DIR ?= bq-schema
 PB_PY_OUT_DIR ?= run/protos
+PB_GO_OUT_DIR ?= go/wptdashboard/protos
+PB_GO_PKG_MAP ?= Mbq_table_name.proto=github.com/mdittmer/protoc-gen-bq-schema/protos
 
 PROTOS=$(wildcard $(PB_LOCAL_LIB_DIR)/*.proto)
 
@@ -26,7 +28,7 @@ test: py_test go_test
 
 lint: py_lint go_lint
 
-proto: bq_proto py_proto
+proto: bq_proto py_proto go_proto
 
 py_lint: py_proto
 	pycodestyle --exclude=*_pb2.py .
@@ -41,10 +43,16 @@ go_test: go_deps
 	go test -v ./...
 
 bq_proto: $(PROTOS)
-	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) --bq-schema_out=$(PB_BQ_OUT_DIR) $(PROTOS)
+	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
+		--bq-schema_out=$(PB_BQ_OUT_DIR) $(PROTOS)
 
 py_proto: $(PROTOS)
-	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) --python_out=$(PB_PY_OUT_DIR) $(PROTOS)
+	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
+		--python_out=$(PB_PY_OUT_DIR) $(PROTOS)
+
+go_proto: $(PROTOS)
+	protoc -I$(PB_LIB_DIR) -I$(PB_BQ_LIB_DIR) -I$(PB_LOCAL_LIB_DIR) \
+		--go_out=$(PB_GO_PKG_MAP):$(PB_GO_OUT_DIR) $(PROTOS)
 
 go_deps: $(find .  -type f | grep '\.go$' | grep -v '\.pb.go$')
 	cd $(GOPATH)/src/wptdashboard; go get -t ./...
