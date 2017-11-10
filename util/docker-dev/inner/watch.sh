@@ -20,40 +20,45 @@ function stop() {
 
 trap stop INT
 
-PB_LIB=${PB_LIB:-"../protobuf/src"}
-PROTOS=${PROTOS:-"./protos"}
-BQ_LIB=${BQ_LIB:-"../protoc-gen-bq-schema"}
-BQ_OUT=${BQ_OUT:-"./bq-schema"}
-PY_OUT=${PY_OUT:-"./run/protos"}
-GO_OUT=${GO_OUT:-"./go/wptdashboard/protos"}
-# TODO: Use GoogleCloudPlatform/mdittmer/protoc-gen-bq-schema after
-# https://github.com/GoogleCloudPlatform/protoc-gen-bq-schema/pull/4
-# lands
-GO_PKGMAP=${GO_PKGMAP:-"Mbq_table_name.proto=github.com/mdittmer/protoc-gen-bq-schema/protos"}
-
-mkdir -p "${BQ_OUT}"
-mkdir -p "${PY_OUT}"
-mkdir -p "${GO_OUT}"
-
-sleep 1
+PROTO_DIR=${PROTO_DIR:-"./protos"}
+PY_DIR=${PY_DIR:-"./run"}
+GO_DIR=${PY_DIR:-"./go"}
 
 function compile_protos() {
-  pushd "${WPTDASHBOARD_DIR}" > /dev/null
   if make proto; then
     info "SUCCESS: Regen from protos"
   else
     error "FAILURE: Regen from protos failed"
   fi
-  popd > /dev/null
 }
 
-compile_protos
+function compile_go() {
+  if make go_deps; then
+    info "SUCCESS: Build go"
+  else
+    error "FAILURE: Build go failed"
+  fi
+}
 
-inotifywait -r -m -e close_write,moved_to,create,delete,modify "${PROTOS}" | \
-    while read -r DIR EVTS F; do
-      if [[ ${F} =~ [.]proto$ ]] && ! [[ ${F} =~ [#~] ]]; then
-        compile_protos
+function monitor() {
+  EXT="${1}"
+  DIR="${2}"
+  FUNC="${3}"
+
+  ${FUNC}
+  inotifywait -r -m -e close_write,moved_to,create,delete,modify "${DIR}" | \
+    while read -r SRC_DIR EVTS F; do
+      if [[ ${F} =~ [.]${EXT}$ ]] && ! [[ ${F} =~ [#~] ]]; then
+        pushd "${WPTDASHBOARD_DIR}" > /dev/null
+        ${FUNC}
+        popd > /dev/null
       else
-        verbose "Non-proto file changed: ${DIR}${F}"
+        verbose "Unmonitoried file changed: ${SRC_DIR}${F}"
       fi
-    done
+    done &
+}
+
+monitor "proto" "${PROTO_DIR}" "compile_protos"
+monitor "go" "${GO_DIR}" "compile_go"
+
+wait
