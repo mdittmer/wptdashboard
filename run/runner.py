@@ -130,7 +130,9 @@ class Runner(object):
         )
 
         if commit_timestamp is not None:
-            self.commit_time = datetime.datetime.fromtimestamp(commit_timestamp)
+            self.commit_time = datetime.datetime.fromtimestamp(
+                commit_timestamp
+            )
         else:
             self.commit_time = None
 
@@ -165,7 +167,6 @@ class Runner(object):
             return_code = self.do_run_remote()
         else:
             return_code = self.do_run_local()
-
 
         self.test_run.end_time.FromDatetime(datetime.now())
 
