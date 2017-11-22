@@ -24,7 +24,6 @@ class Runner(object):
     )
     ASSERT_SHA_LEN = 'Runner.long_sha required. (Default: `WPT_SHA` env var.)'
 
-
     def __init__(
         self,
 
@@ -66,9 +65,9 @@ class Runner(object):
 
         self.long_sha = long_sha
         if long_sha is not None:
-          self.sha = self.long_sha[0:10]
+            self.sha = self.long_sha[0:10]
         else:
-          self.sha = None
+            self.sha = None
 
         self.sauce_from_metadata = sauce_from_metadata
         self.sauce_key = sauce_key
