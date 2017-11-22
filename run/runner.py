@@ -130,9 +130,9 @@ class Runner(object):
         )
 
         if commit_timestamp is not None:
-          self.commit_time = datetime.datetime.fromtimestamp(commit_timestamp)
+            self.commit_time = datetime.datetime.fromtimestamp(commit_timestamp)
         else:
-          self.commit_time = None
+            self.commit_time = None
 
         self.test_run = test_run
         self.proto_builder = proto_builder
