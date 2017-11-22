@@ -19,6 +19,7 @@ if __name__ == '__main__':
         prod_run=bool(os.environ.get('PROD_RUN', False)),
         prod_wet_run=bool(os.environ.get('PROD_WET_RUN', False)),
         long_sha=os.environ.get('WPT_SHA'),
+        commit_timestamp=int(os.environ.get('WPT_TIMESTAMP')),
         sauce_from_metadata=bool(os.environ.get('SAUCE_FROM_METADATA', False)),
         sauce_key=os.environ.get('SAUCE_KEY', ''),
         sauce_user=os.environ.get('SAUCE_USER', ''),

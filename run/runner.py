@@ -1,9 +1,13 @@
+import datetime
 import gzip
 import json
 import os
 import requests
 import subprocess
 import time
+
+from protos.test_run_pb2 import TestRun
+from util import ProtoBuilder
 
 
 # TODO after --install-browser verify browser
@@ -23,6 +27,9 @@ class Runner(object):
         '(Default: `WPT_PATH` env var.)',
     )
     ASSERT_SHA_LEN = 'Runner.long_sha required. (Default: `WPT_SHA` env var.)'
+    ASSERT_COMMIT_TIME = 'Runner.commit_timestamp, %s, required.' % (
+        'UTC timestamp-since-epoch associated with WPT commit'
+    )
 
     def __init__(
         self,
@@ -56,6 +63,9 @@ class Runner(object):
         gs_http_results_url=None,
         summary_filename=None,
         summary_http_url=None,
+        commit_timestamp=None,
+        test_run=TestRun(),
+        proto_builder=ProtoBuilder(),
     ):
         self.metadata_url = metadata_url
         self.prod_host = prod_host,
@@ -119,8 +129,31 @@ class Runner(object):
             )
         )
 
+        if commit_timestamp is not None:
+          self.commit_time = datetime.datetime.fromtimestamp(commit_timestamp)
+        else:
+          self.commit_time = None
+
+        self.test_run = test_run
+        self.proto_builder = proto_builder
+
     def run(self):
         self.validate()
+
+        self.test_run.wpt_hash = self.long_sha
+        self.test_run.wpt_commit_time.FromDatetime(self.commit_time)
+        self.test_run.os = self.proto_builder.os_from_platform(self.platform)
+        self.test_run.os_version_str = (
+            self.proto_builder.os_version_str_from_platform(self.platform)
+        )
+        self.test_run.browser = self.proto_builder.browser_from_platform(
+            self.platform
+        )
+        self.test_run.browser_version_str = (
+            self.proto_builder.browser_version_str_from_platform(self.platform)
+        )
+        self.test_run.start_time.FromDatetime(datetime.now())
+
         if self.will_upload():
             self.prep_for_upload()
         if self.run_is_remote():
@@ -133,9 +166,13 @@ class Runner(object):
         else:
             return_code = self.do_run_local()
 
+
+        self.test_run.end_time.FromDatetime(datetime.now())
+
         print('==================================================')
         print('Finished WPT run')
         print('Return code from wptrunner: %s' % return_code)
+        print('TestRun proto: %s' % str(self.test_run))
 
         report = self.load_local_report()
         summary = self.report_to_summary(report)
@@ -184,6 +221,8 @@ class Runner(object):
             self.platform_id, self.platform = self.get_and_validate_platform(
                 self.wptd_path,
             )
+
+        assert self.commit_time is not None, Runner.ASSERT_COMMIT_TIME
 
         if self.platform.get('sauce'):
             assert self.sauce_key and self.sauce_user, Runner.ASSERT_SAUCE_DATA
