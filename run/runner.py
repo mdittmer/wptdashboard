@@ -22,7 +22,8 @@ class Runner(object):
     ASSERT_WPT_PATH_FMT = 'Runner.wpt_path cannot end with /. %s' % (
         '(Default: `WPT_PATH` env var.)',
     )
-    ASSERT_SHA_LEN = 'Runner.sha required. (Default: `WPT_SHA` env var.)'
+    ASSERT_SHA_LEN = 'Runner.long_sha required. (Default: `WPT_SHA` env var.)'
+
 
     def __init__(
         self,
@@ -35,7 +36,7 @@ class Runner(object):
         gs_results_bucket=None,
         prod_run=False,
         prod_wet_run=False,
-        sha=None,
+        long_sha=None,
         sauce_from_metadata=False,
         sauce_key=None,
         sauce_user=None,
@@ -62,7 +63,13 @@ class Runner(object):
         self.gs_results_bucket = gs_results_bucket,
         self.prod_run = prod_run
         self.prod_wet_run = prod_wet_run
-        self.sha = sha
+
+        self.long_sha = long_sha
+        if long_sha is not None:
+          self.sha = self.long_sha[0:10]
+        else:
+          self.sha = None
+
         self.sauce_from_metadata = sauce_from_metadata
         self.sauce_key = sauce_key
         self.sauce_user = sauce_user
@@ -172,6 +179,7 @@ class Runner(object):
     def validate(self):
         assert self.wpt_path, Runner.ASSERT_WPT_PATH
         assert not self.wpt_path.endswith('/'), Runner.ASSERT_WPT_PATH_FMT
+        assert len(self.long_sha) == 40, Runner.ASSERT_SHA_LEN
         assert len(self.sha) == 10, Runner.ASSERT_SHA_LEN
         if not (self.platform_id and self.platform):
             self.platform_id, self.platform = self.get_and_validate_platform(

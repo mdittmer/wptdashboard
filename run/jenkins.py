@@ -18,7 +18,7 @@ if __name__ == '__main__':
         gs_results_bucket='wptd',
         prod_run=bool(os.environ.get('PROD_RUN', False)),
         prod_wet_run=bool(os.environ.get('PROD_WET_RUN', False)),
-        sha=os.environ.get('WPT_SHA'),
+        long_sha=os.environ.get('WPT_SHA'),
         sauce_from_metadata=bool(os.environ.get('SAUCE_FROM_METADATA', False)),
         sauce_key=os.environ.get('SAUCE_KEY', ''),
         sauce_user=os.environ.get('SAUCE_USER', ''),
