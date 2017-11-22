@@ -19,7 +19,7 @@ option go_package = "generated";
 
 enum OperatingSystem {
   OPERATING_SYSTEM_UNKNOWN = 0;
-  DARWIN = 1;
-  LINUX = 2;
+  LINUX = 1;
+  MACOS = 2;
   WINDOWS = 3;
 }
