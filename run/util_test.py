@@ -5,6 +5,7 @@ import unittest
 import util
 from protos.test_run_pb2 import TestRun
 
+
 class TestBrowsers(unittest.TestCase):
     def test_os_from_platform_browsers_json(self):
         wptd_path = '%s/..' % os.path.dirname(os.path.abspath(__file__))
