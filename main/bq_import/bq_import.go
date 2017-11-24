@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"io"
 	"io/ioutil"
@@ -14,6 +15,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	models "wptdashboard"
+	protos "wptdashboard/generated"
+
+	"cloud.google.com/go/datastore"
+	"golang.org/x/net/context"
+	"google.golang.org/api/iterator"
 )
 
 type Cmd struct {
@@ -116,24 +123,81 @@ func makeCmd(dir *string, args ...string) (ret Cmd) {
 	return ret
 }
 
-func gsutilLs(args ...string) (entries []string, err error) {
-	cmd := makeCmd(nil, append(append(append(make([]string, 0), "gsutil"), "ls"), args...)...)
-	if err != nil {
-		return entries, err
-	}
-	if err := cmd.Start(); err != nil {
-		return entries, err
-	}
-	scanner := bufio.NewScanner(cmd.stdout)
-	entries = make([]string, 0)
-	for scanner.Scan() {
-		entries = append(entries, strings.TrimSpace(scanner.Text()))
-	}
-	if err := scanner.Err(); err != nil {
-		return entries, err
-	}
-	return entries, err
+type ChanCmd struct {
+	cmd        Cmd
+	stdoutChan chan string
+	stderrChan chan string
 }
+
+func makeChanCmd(dir *string, args ...string) ChanCmd {
+	return ChanCmd{makeCmd(dir, args...), make(chan string), make(chan string)}
+}
+
+func (chanCmd ChanCmd) Start(errChan chan error) {
+	cmd := chanCmd.cmd
+	if err := cmd.Start(); err != nil {
+		errChan <- err
+		close(errChan)
+		return
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	scan := func(reader io.ReadCloser, channel chan string) {
+		defer close(channel)
+		defer wg.Done()
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			channel <- strings.TrimSpace(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			errChan <- err
+		}
+	}
+	go scan(cmd.stdout, chanCmd.stdoutChan)
+	go scan(cmd.stderr, chanCmd.stderrChan)
+	go func() {
+		defer close(errChan)
+		wg.Wait()
+	}()
+}
+
+func (chanCmd ChanCmd) Wait(errChan chan error) {
+	cmd := chanCmd.cmd
+	err := cmd.Wait()
+	if err != nil {
+		errChan <- err
+	}
+}
+
+// func gsutilLsToChan(outChan chan string, errChan chan error, args ...string) {
+// 	defer close(outChan)
+// 	defer close(errChan)
+// 	cmd := makeCmd(nil, append(append(append(make([]string, 0), "gsutil"), "ls"), args...)...)
+// 	if err := cmd.Start(); err != nil {
+// 		errChan <- err
+// 		return
+// 	}
+// 	scanner := bufio.NewScanner(cmd.stdout)
+// 	for scanner.Scan() {
+// 		outChan <- strings.TrimSpace(scanner.Text())
+// 	}
+// 	if err := scanner.Err(); err != nil {
+// 		errChan <- err
+// 	}
+// }
+
+// func gsutilLs(args ...string) (entries []string, err error) {
+// 	outChan := make(chan string)
+// 	errChan := make(chan error)
+// 	go gsutilLsToChan(outChan, errChan, args...)
+// 	for err := range errChan {
+// 		return entries, err
+// 	}
+// 	for entry := range outChan {
+// 		entries = append(entries, entry)
+// 	}
+// 	return entries, err
+// }
 
 func filterGsUrlsToHashes(urls []string) (hashes []string) {
 	hashes = make([]string, 0)
@@ -222,7 +286,22 @@ func shortHashToTime(wptPath string, shortHash string) *time.Time {
 	return &timeValue
 }
 
+type CommitCacheKey struct {
+	wptPath   string
+	shortHash string
+}
+
+var commitCache map[CommitCacheKey]*Commit
+
 func shortHashToCommit(wptPath string, shortHash string) (commit *Commit) {
+	if commitCache == nil {
+		commitCache = make(map[CommitCacheKey]*Commit)
+	}
+	commitCacheKey := CommitCacheKey{wptPath, shortHash}
+	if commitCache[commitCacheKey] != nil {
+		return commitCache[commitCacheKey]
+	}
+
 	longHashChan := make(chan *string)
 	timeChan := make(chan *time.Time)
 	go func() {
@@ -262,15 +341,111 @@ func hashesToCommits(wptPath string, hashes []string) (commits []*Commit) {
 	return commits
 }
 
-func gsutilCp(src string, dst string) (err error) {
-	cmd := makeCmd(nil, "gsutil", "cp", "-r", "-n", src, dst)
-	if err := cmd.Start(); err != nil {
-		return err
+// func gsutilCp(remoteBaseUrl string, localBasePath string, url string) error {
+// 	sep := "/"
+// 	if remoteBaseUrl[len(remoteBaseUrl)-1] == '/' {
+// 		sep = ""
+// 	}
+
+// 	localPath := localBasePath + sep + url[len(localBasePath):]
+
+// 	// Skip cp when file exists, or some weird error in the file system
+// 	// occurred
+// 	if _, err := os.Stat(localPath); err == nil || !os.IsNotExist(err) {
+// 		return err
+// 	}
+
+// 	cmd := makeCmd(nil, "gsutil", "cp", url, localPath)
+// 	if err := cmd.Start(); err != nil {
+// 		return err
+// 	}
+// 	if err := cmd.Wait(); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
+
+// func gsutilCatRecursive(url string, path string) (err error) {
+// 	lsOutChan := make(chan string)
+// 	lsErrChan := make(chan error)
+// 	cpErrChan := make(chan error)
+// 	go gsutilLsToChan(lsOutChan, lsErrChan, "-r", url)
+// 	go func() {
+// 		defer close(cpErrChan)
+// 		for entry := range lsOutChan {
+// 			// Skip short lines and directories
+// 			if len(entry) <= len(url) || entry[len(entry)-1] == '/' {
+// 				continue
+// 			}
+// 			cpErr := gsutilCat(url, path, entry)
+// 			if cpErr != nil {
+// 				cpErrChan <- cpErr
+// 			}
+// 		}
+// 	}()
+// 	for lsErr := range lsErrChan {
+// 		if err == nil {
+// 			err = lsErr
+// 		}
+// 	}
+// 	for cpErr := range cpErrChan {
+// 		if err == nil {
+// 			err = cpErr
+// 		}
+// 	}
+// 	return err
+// }
+
+type SubTest struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type TestResults struct {
+	Test     string    `json:"test"`
+	Status   string    `json:"status"`
+	Message  *string   `json:"message"`
+	Subtests []SubTest `json:"subtests"`
+}
+
+func unmarshalTestResult(data []byte) (testResults []protos.TestResult, err error) {
+	var jsonTestResults TestResults
+	err = json.Unmarshal(data, &jsonTestResults)
+	if err != nil {
+		return testResults, err
 	}
-	if err := cmd.Wait(); err != nil {
-		return err
+	// TODO: Copy jsonTestResults into testResults
+	return testResults, err
+}
+
+func hashesFromDatastore(projectId string) (hashes []string, err error) {
+	ctx := context.Background()
+	client, err := datastore.NewClient(ctx, projectId)
+	if err != nil {
+		return hashes, err
 	}
-	return nil
+	query := datastore.NewQuery("TestRun").Project("Revision")
+	it := client.Run(ctx, query)
+
+	// Dedup hashes with map
+	seen := make(map[string]bool)
+	for {
+		var testRun models.TestRun
+		_, err := it.Next(&testRun)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return hashes, err
+		}
+		if seen[testRun.Revision] {
+			continue
+		}
+		seen[testRun.Revision] = true
+		hashes = append(hashes, testRun.Revision)
+	}
+	return hashes, err
 }
 
 func main() {
@@ -278,45 +453,74 @@ func main() {
 	gsUrl := flag.String("gs_url", "gs://wptd", "Google Cloud Storage URL that is parent directory to git hash directories")
 	wptPath := flag.String("wpt_path", os.Getenv("HOME")+"/web-platform-tests", "Path to Web Platform Tests repository")
 	dataPath := flag.String("data_path", os.Getenv("HOME")+"/wpt-data", "Path to data directory for local data copied from Google Cloud Storage")
+	projectId := flag.String("project_id", "wptdashboard", "Google Cloud Platform project id")
 
-	if _, err := os.Stat(*dataPath); os.IsNotExist(err) {
-		os.Mkdir(*dataPath, os.ModePerm)
-	}
+	//
+	// Wait for both commitsDS and commitsCS
+	//
+	var commitsDS []*Commit
+	var commitsCS []*Commit
+	var wg sync.WaitGroup
+	wg.Add(2)
 
-	entries, err := gsutilLs(*gsUrl)
-	if err != nil {
-		log.Fatal(err)
-	}
+	//
+	// Get commitsDS from Datastore
+	//
+	go func() {
+		defer wg.Done()
+		if _, err := os.Stat(*dataPath); os.IsNotExist(err) {
+			os.Mkdir(*dataPath, os.ModePerm)
+		}
 
-	hashes := filterGsUrlsToHashes(entries)
-	commits := dropNilCommits(hashesToCommits(*wptPath, hashes))
-	sort.Sort(sort.Reverse(ByCommitTime(commits)))
-
-	// To test, just try a couple
-	commits = commits[:1]
-
-	// for _, commit := range commits {
-	// 	src := *gsUrl + "/" + commit.shortHash
-	// 	dst := *dataPath + "/" + commit.shortHash
-
-	// 	if _, err := os.Stat(dst); os.IsNotExist(err) {
-	// 		os.Mkdir(dst, os.ModePerm)
-	// 	}
-
-	// 	gsutilCp(src, dst)
-	// }
-	for _, commit := range commits {
-		remotePath := *gsUrl + "/" + commit.shortHash
-		entries, err := gsutilLs("-r", remotePath)
+		hashesDS, err := hashesFromDatastore(*projectId)
 		if err != nil {
 			log.Fatal(err)
 		}
-		for _, entry := range entries {
-			if len(entry) <= len(remotePath) {
-				log.Printf("Short path  : %s\n", entry)
-			} else {
-				log.Printf("Clipped path: %s\n", entry[len(remotePath):])
-			}
+		commitsDS = dropNilCommits(hashesToCommits(*wptPath, hashesDS))
+		sort.Sort(sort.Reverse(ByCommitTime(commitsDS)))
+	}()
+
+	//
+	// Get commitsCS from Cloud Storage
+	//
+	go func() {
+		defer wg.Done()
+		gsutilLsErrors := make(chan error)
+		gsutilLs := makeChanCmd(nil, "gsutil", "ls", *gsUrl)
+		gsutilLs.Start(gsutilLsErrors)
+		gsutilLs.Wait(gsutilLsErrors)
+
+		entries := make([]string, 0)
+		for entry := range gsutilLs.stdoutChan {
+			entries = append(entries, entry)
+		}
+		for err := range gsutilLsErrors {
+			log.Fatal(err)
+		}
+
+		hashes := filterGsUrlsToHashes(entries)
+		commitsCS = dropNilCommits(hashesToCommits(*wptPath, hashes))
+		sort.Sort(sort.Reverse(ByCommitTime(commitsCS)))
+	}()
+
+	wg.Wait()
+	goodRuns := make([]Commit)
+	for i, j := 0, 0; i < len(commitsDS) && j < len(commitsCS); {
+		cmp := strings.Compare(commitsDS[i].shortHash, commitsCS[j].shortHash)
+		if cmp < 0 {
+			log.Printf("Lone DS: %s", commitsDS[i])
+			i++
+		} else if cmp > 0 {
+			log.Printf("Lone CS: %s", commitsCS[j])
+			j++
+		} else {
+			goodRuns = append(goodRuns, *commitDS[i])
+			i++
+			j++
 		}
 	}
+
+	// for _, commit := range commits {
+	// 	log.Println(commit)
+	// }
 }
