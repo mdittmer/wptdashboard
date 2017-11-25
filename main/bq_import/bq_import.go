@@ -1,8 +1,10 @@
 package main
 
 import (
+	// "cloud.google.com/go/bigquery"
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"io/ioutil"
@@ -19,8 +21,11 @@ import (
 	protos "wptdashboard/generated"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/storage"
+	"github.com/golang/protobuf/ptypes"
 	"golang.org/x/net/context"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 type Cmd struct {
@@ -320,22 +325,14 @@ func shortHashToCommit(wptPath string, shortHash string) (commit *Commit) {
 }
 
 func hashesToCommits(wptPath string, hashes []string) (commits []*Commit) {
-	commitChan := make(chan *Commit)
 	var wg sync.WaitGroup
 	wg.Add(len(hashes))
 	for _, hash := range hashes {
 		go func(shortHash string) {
 			defer wg.Done()
-			commitChan <- shortHashToCommit(wptPath, shortHash)
+			commits = append(commits, shortHashToCommit(wptPath, shortHash))
 		}(hash)
 	}
-
-	commits = make([]*Commit, 0)
-	go func() {
-		for commit := range commitChan {
-			commits = append(commits, commit)
-		}
-	}()
 	wg.Wait()
 
 	return commits
@@ -399,7 +396,7 @@ func hashesToCommits(wptPath string, hashes []string) (commits []*Commit) {
 type SubTest struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
-	Message string `json:"message"`
+	Message *string `json:"message"`
 }
 
 type TestResults struct {
@@ -419,12 +416,7 @@ func unmarshalTestResult(data []byte) (testResults []protos.TestResult, err erro
 	return testResults, err
 }
 
-func hashesFromDatastore(projectId string) (hashes []string, err error) {
-	ctx := context.Background()
-	client, err := datastore.NewClient(ctx, projectId)
-	if err != nil {
-		return hashes, err
-	}
+func hashesFromDatastore(ctx context.Context, client datastore.Client) (hashes []string, err error) {
 	query := datastore.NewQuery("TestRun").Project("Revision")
 	it := client.Run(ctx, query)
 
@@ -448,13 +440,91 @@ func hashesFromDatastore(projectId string) (hashes []string, err error) {
 	return hashes, err
 }
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	gsUrl := flag.String("gs_url", "gs://wptd", "Google Cloud Storage URL that is parent directory to git hash directories")
-	wptPath := flag.String("wpt_path", os.Getenv("HOME")+"/web-platform-tests", "Path to Web Platform Tests repository")
-	dataPath := flag.String("data_path", os.Getenv("HOME")+"/wpt-data", "Path to data directory for local data copied from Google Cloud Storage")
-	projectId := flag.String("project_id", "wptdashboard", "Google Cloud Platform project id")
+func createdAtFromShortHashDatastore(ctx context.Context, client datastore.Client, shortHash string) (createdAt time.Time, err error) {
+	var testRuns []models.TestRun
+	query := datastore.NewQuery("TestRun").Filter("Revision=", shortHash).Project("CreatedAt").Limit(1)
+	client.GetAll(ctx, query, &testRuns)
+	if len(testRuns) != 1 {
+		return createdAt, errors.New("Failed to find revision in Datastore: " + shortHash)
+	}
+	return testRuns[0].CreatedAt, err
+}
 
+func hashesFromDataPath(dataPath string) (hashes []string, err error) {
+	entries, err := ioutil.ReadDir(dataPath)
+	if err != nil {
+		return hashes, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			maybeHash := entry.Name()
+			matched, matchErr := regexp.MatchString("^[0-9a-f]+$", maybeHash)
+			if matchErr != nil {
+				continue
+			}
+			if matched {
+				hashes = append(hashes, maybeHash)
+			}
+		}
+	}
+	return hashes, err
+}
+
+func addPlatformToTestRun(platformStr string, testRun *protos.TestRun) (err error) {
+	parts := strings.Split(platformStr, "-")
+	if len(parts) > 0 {
+		browserName := strings.ToUpper(parts[0])
+		testRun.Browser = protos.Browser(protos.Browser_value[browserName])
+	}
+	if len(parts) > 1 {
+		testRun.BrowserVersionStr = parts[1]
+	}
+	if len(parts) > 2 {
+		osName := strings.ToUpper(parts[2])
+		testRun.Os = protos.OperatingSystem(protos.OperatingSystem_value[osName])
+	}
+	if len(parts) > 3 {
+		testRun.OsVersionStr = parts[3]
+	}
+	if len(parts) > 4 {
+		return errors.New("Malformed platform string")
+	}
+	return nil
+}
+
+func addCommitToTestRun(commit Commit, testRun *protos.TestRun) (err error) {
+	testRun.WptHash = commit.longHash
+	protoCommitTime, err := ptypes.TimestampProto(commit.commitTime)
+	if err == nil {
+		testRun.WptCommitTime = protoCommitTime
+	}
+	return err
+}
+
+type TestRun struct {
+	platformStr string
+	testRun protos.TestRun
+}
+
+func testRunsFromDataPath(dataPath string, hash string) (testRuns []TestRun, err error) {
+	entries, err := ioutil.ReadDir(dataPath + "/" + hash)
+	if err != nil {
+		return testRuns, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			platformStr := entry.Name()
+			var testRun protos.TestRun
+			if err := addPlatformToTestRun(platformStr, &testRun); err != nil {
+				return testRuns, err
+			}
+			testRuns = append(testRuns, TestRun{platformStr, testRun})
+		}
+	}
+	return testRuns, err
+}
+
+func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client, cs *storage.Client, bucket *storage.BucketHandle) ([]Commit) {
 	//
 	// Wait for both commitsDS and commitsCS
 	//
@@ -468,11 +538,7 @@ func main() {
 	//
 	go func() {
 		defer wg.Done()
-		if _, err := os.Stat(*dataPath); os.IsNotExist(err) {
-			os.Mkdir(*dataPath, os.ModePerm)
-		}
-
-		hashesDS, err := hashesFromDatastore(*projectId)
+		hashesDS, err := hashesFromDatastore(ctx, *ds)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -485,26 +551,38 @@ func main() {
 	//
 	go func() {
 		defer wg.Done()
-		gsutilLsErrors := make(chan error)
-		gsutilLs := makeChanCmd(nil, "gsutil", "ls", *gsUrl)
-		gsutilLs.Start(gsutilLsErrors)
-		gsutilLs.Wait(gsutilLsErrors)
-
-		entries := make([]string, 0)
-		for entry := range gsutilLs.stdoutChan {
-			entries = append(entries, entry)
+		it := bucket.Objects(ctx, &storage.Query{Delimiter: "/"})
+		hashes := make([]string, 0)
+		for {
+			attrs, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			// Prefix only set on directories, which is what we
+			// seek.
+			if attrs.Prefix != "" {
+				// Drop trailing slash
+				maybeHash := attrs.Prefix[:len(attrs.Prefix)-1]
+				// Match as hash
+				matched, matchErr := regexp.MatchString("^[0-9a-f]+$", maybeHash)
+				if matchErr != nil {
+					continue
+				}
+				if matched {
+					hashes = append(hashes, maybeHash)
+				}
+			}
 		}
-		for err := range gsutilLsErrors {
-			log.Fatal(err)
-		}
 
-		hashes := filterGsUrlsToHashes(entries)
 		commitsCS = dropNilCommits(hashesToCommits(*wptPath, hashes))
 		sort.Sort(sort.Reverse(ByCommitTime(commitsCS)))
 	}()
 
 	wg.Wait()
-	goodRuns := make([]Commit)
+	goodRuns := make([]Commit, 0)
 	for i, j := 0, 0; i < len(commitsDS) && j < len(commitsCS); {
 		cmp := strings.Compare(commitsDS[i].shortHash, commitsCS[j].shortHash)
 		if cmp < 0 {
@@ -514,13 +592,269 @@ func main() {
 			log.Printf("Lone CS: %s", commitsCS[j])
 			j++
 		} else {
-			goodRuns = append(goodRuns, *commitDS[i])
+			goodRuns = append(goodRuns, *commitsDS[i])
 			i++
 			j++
 		}
 	}
 
-	// for _, commit := range commits {
-	// 	log.Println(commit)
+	return goodRuns
+}
+
+func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, testRun protos.TestRun, objName string, resultChan chan protos.TestResult, errChan chan error) {
+	obj := bucket.Object(objName)
+	reader, err := obj.NewReader(ctx)
+	if err != nil {
+		errChan <- err
+		return
+	}
+	bytes, err := ioutil.ReadAll(reader)
+	if err != nil {
+		errChan <- err
+		return
+	}
+	var results TestResults
+	if err := json.Unmarshal(bytes, results); err != nil {
+		errChan <- err
+		return
+	}
+
+	statusName := strings.ToUpper(results.Status)
+	status := protos.TestStatus(protos.TestStatus_value["TEST_" + statusName])
+	var message string
+	if results.Message == nil {
+		message = ""
+	} else {
+		message = *results.Message
+	}
+	resultChan <- protos.TestResult {
+		Os: testRun.Os,
+		OsVersionStr: testRun.OsVersionStr,
+		Browser: testRun.Browser,
+		BrowserVersionStr: testRun.BrowserVersionStr,
+		WptHash: testRun.WptHash,
+		WptCommitTime: testRun.WptCommitTime,
+		TestName: results.Test,
+		Status: status,
+		TestMessage: message,
+	}
+	for _, subTest := range results.Subtests {
+		subStatusName := strings.ToUpper(subTest.Status)
+		subStatus := protos.SubTestStatus(protos.SubTestStatus_value["SUB_TEST_" + subStatusName])
+		var subMessage string
+		if subTest.Message == nil {
+			subMessage = ""
+		} else {
+			subMessage = *subTest.Message
+		}
+		resultChan <- protos.TestResult {
+			Os: testRun.Os,
+			OsVersionStr: testRun.OsVersionStr,
+			Browser: testRun.Browser,
+			BrowserVersionStr: testRun.BrowserVersionStr,
+			WptHash: testRun.WptHash,
+			WptCommitTime: testRun.WptCommitTime,
+			TestName: results.Test,
+			Status: status,
+			TestMessage: message,
+			TestSubName: subTest.Name,
+			TestSubStatus: subStatus,
+			TestSubMessage: subMessage,
+		}
+	}
+}
+
+func processTestRunResultsRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, shortHash string, platformStr string, testRun protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
+	log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" + shortHash + platformStr)
+	it := bucket.Objects(ctx, &storage.Query{
+		Prefix: shortHash + "/" + platformStr + "/",
+	})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			errChan <- err
+			continue
+		}
+		if attrs.Name == "" {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			catAndDecodeObjectRemote(ctx, cs, bucket, testRun, attrs.Name, resultChan, errChan)
+		}()
+	}
+	wg.Done()
+	wg.Wait()
+}
+
+func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, commit Commit, runChan chan protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
+	shortHash := commit.shortHash
+	it := bucket.Objects(ctx, &storage.Query{
+		Delimiter: "/",
+		Prefix: shortHash,
+	})
+	var wg sync.WaitGroup
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			errChan <- err
+			continue
+		}
+		// Prefix only set on directories, which is what we
+		// seek.
+		if attrs.Prefix != "" {
+			// Drop trailing slash
+			log.Println("+++++++++++++++++++++++++++++++++" + attrs.Prefix)
+			platformStr := attrs.Prefix[:len(attrs.Prefix)-1]
+			var testRun protos.TestRun
+			if err := addPlatformToTestRun(platformStr, &testRun); err != nil {
+				errChan <- err
+			} else {
+				runChan <- testRun
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					processTestRunResultsRemote(ctx, cs, bucket, shortHash, platformStr, testRun, resultChan, errChan)
+				}()
+			}
+		}
+	}
+	wg.Wait()
+}
+
+func processCommitsRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, commits []Commit) (runChan chan protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
+	runChan = make(chan protos.TestRun)
+	resultChan = make(chan protos.TestResult)
+	errChan = make(chan error)
+	var wg sync.WaitGroup
+	wg.Add(len(commits))
+	for _, commit := range commits {
+		go func(c Commit) {
+			defer wg.Done()
+			processCommitRemote(ctx, cs, bucket, c, runChan, resultChan, errChan)
+		}(commit)
+	}
+
+	go func() {
+		defer close(runChan)
+		defer close(resultChan)
+		defer close(errChan)
+		wg.Wait()
+	}()
+
+	return runChan, resultChan, errChan
+}
+
+func getCommitsLocal(wptPath *string, dataPath *string) (commits []Commit) {
+	hashes, err := hashesFromDataPath(*dataPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	commitPtrs := dropNilCommits(hashesToCommits(*wptPath, hashes))
+	sort.Sort(sort.Reverse(ByCommitTime(commitPtrs)))
+	for _, commit := range commitPtrs {
+		commits = append(commits, *commit)
+	}
+	return commits
+}
+
+func processCommitsLocal(dataPath *string, commits []Commit) {
+	// ctx := context.Background()
+	// client, err := datastore.NewClient(ctx, projectId)
+	// if err != nil {
+	// 	log.Fatal(err)
 	// }
+
+	// testResultChan := make(chan protos.TestResult)
+	for _, commit := range commits {
+		testRuns, err := testRunsFromDataPath(*dataPath, commit.shortHash)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, testRun := range testRuns {
+			if err := addCommitToTestRun(commit, &testRun.testRun); err != nil {
+				log.Fatal(err)
+			}
+
+			// createdAt, err := createdAtFromShortHashDatastore(ctx, client, commit.shortHash)
+			// if err != nil {
+			// 	log.Fatal(err)
+			// }
+
+			findErrors := make(chan error)
+			find := makeChanCmd(nil, "find", *dataPath + "/" + commit.shortHash + "/" + testRun.platformStr, "-type", "f")
+			find.Start(findErrors)
+			find.Wait(findErrors)
+
+			// TODO: Write this
+			// catAndDecodeFiles(testRun.testRun, find.stdoutChan, testResultChan)
+
+			// TODO: Should spawn goroutines for each element,
+			// rather than waiting for close(chan), as range chan
+			// does.
+			entries := make([]string, 0)
+			for entry := range find.stdoutChan {
+				entries = append(entries, entry)
+			}
+			for err := range findErrors {
+				log.Fatal(err)
+			}
+			log.Println(entries)
+		}
+	}
+
+	// TODO: Consume testResultChan
+}
+
+func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	// gsUrl := flag.String("gs_url", "gs://wptd", "Google Cloud Storage URL that is parent directory to git hash directories")
+	wptPath := flag.String("wpt_path", os.Getenv("HOME")+"/web-platform-tests", "Path to Web Platform Tests repository")
+	// dataPath := flag.String("data_path", os.Getenv("HOME")+"/wpt-data", "Path to data directory for local data copied from Google Cloud Storage")
+	projectId := flag.String("project_id", "wptdashboard", "Google Cloud Platform project id")
+
+	ctx := context.Background()
+	ds, err := datastore.NewClient(ctx, *projectId)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cs, err := storage.NewClient(ctx, option.WithoutAuthentication())
+	bucket := cs.Bucket("wptd")
+
+	commits := getCommitsRemote(wptPath, ctx, ds, cs, bucket)
+	runChan, resultChan, errChan := processCommitsRemote(ctx, cs, bucket, commits)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func(c chan protos.TestRun) {
+		defer wg.Done()
+		for v := range c {
+			log.Println(v)
+		}
+	}(runChan)
+	go func(c chan protos.TestResult) {
+		defer wg.Done()
+		for v := range c {
+			log.Println(v)
+		}
+	}(resultChan)
+	go func(c chan error) {
+		defer wg.Done()
+		for v := range c {
+			log.Println(v)
+		}
+	}(errChan)
+	wg.Wait()
+
+	// commits := getCommitsLocal(wptPath, dataPath)
+	// processCommitsLocal(dataPath, commits)
 }
