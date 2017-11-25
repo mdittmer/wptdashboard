@@ -614,7 +614,7 @@ func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *s
 		return
 	}
 	var results TestResults
-	if err := json.Unmarshal(bytes, results); err != nil {
+	if err := json.Unmarshal(bytes, &results); err != nil {
 		errChan <- err
 		return
 	}
@@ -665,7 +665,6 @@ func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *s
 }
 
 func processTestRunResultsRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, shortHash string, platformStr string, testRun protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
-	log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" + shortHash + platformStr)
 	it := bucket.Objects(ctx, &storage.Query{
 		Prefix: shortHash + "/" + platformStr + "/",
 	})
@@ -695,9 +694,10 @@ func processTestRunResultsRemote(ctx context.Context, cs *storage.Client, bucket
 
 func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, commit Commit, runChan chan protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
 	shortHash := commit.shortHash
+	prefix := shortHash + "/"
 	it := bucket.Objects(ctx, &storage.Query{
 		Delimiter: "/",
-		Prefix: shortHash,
+		Prefix: prefix,
 	})
 	var wg sync.WaitGroup
 	for {
@@ -713,8 +713,7 @@ func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storag
 		// seek.
 		if attrs.Prefix != "" {
 			// Drop trailing slash
-			log.Println("+++++++++++++++++++++++++++++++++" + attrs.Prefix)
-			platformStr := attrs.Prefix[:len(attrs.Prefix)-1]
+			platformStr := attrs.Prefix[len(prefix):len(attrs.Prefix)-1]
 			var testRun protos.TestRun
 			if err := addPlatformToTestRun(platformStr, &testRun); err != nil {
 				errChan <- err
