@@ -3,6 +3,8 @@ package main
 import (
 	// "cloud.google.com/go/bigquery"
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,6 +22,7 @@ import (
 	models "wptdashboard"
 	protos "wptdashboard/generated"
 
+	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/storage"
 	"github.com/golang/protobuf/ptypes"
@@ -27,6 +30,25 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
+
+type Nothing struct {}
+type CountingSemaphore chan Nothing
+var netSem CountingSemaphore
+type VoidFunc func()
+
+func (s CountingSemaphore) Acquire() {
+	s <- Nothing{}
+}
+
+func (s CountingSemaphore) Release() {
+	<- s
+}
+
+func (s CountingSemaphore) With(f VoidFunc) {
+	s.Acquire()
+	defer s.Release()
+	f()
+}
 
 type Cmd struct {
 	dir    *string
@@ -259,13 +281,13 @@ func shortHashToLongHash(wptPath string, shortHash string) *string {
 		log.Println(err)
 		return nil
 	}
-	bytes, err := ioutil.ReadAll(cmd.stdout)
+	data, err := ioutil.ReadAll(cmd.stdout)
 	go cmd.Wait()
 	if err != nil {
 		log.Println(err)
 		return nil
 	}
-	str := strings.TrimSpace(string(bytes))
+	str := strings.TrimSpace(string(data))
 	return &str
 }
 
@@ -275,13 +297,13 @@ func shortHashToTime(wptPath string, shortHash string) *time.Time {
 		log.Println(err)
 		return nil
 	}
-	bytes, err := ioutil.ReadAll(cmd.stdout)
+	data, err := ioutil.ReadAll(cmd.stdout)
 	go cmd.Wait()
 	if err != nil {
 		log.Println(err)
 		return nil
 	}
-	str := strings.TrimSpace(string(bytes))
+	str := strings.TrimSpace(string(data))
 	timestamp, err := strconv.ParseInt(str, 10, 64)
 	if err != nil {
 		log.Println(err)
@@ -338,61 +360,6 @@ func hashesToCommits(wptPath string, hashes []string) (commits []*Commit) {
 	return commits
 }
 
-// func gsutilCp(remoteBaseUrl string, localBasePath string, url string) error {
-// 	sep := "/"
-// 	if remoteBaseUrl[len(remoteBaseUrl)-1] == '/' {
-// 		sep = ""
-// 	}
-
-// 	localPath := localBasePath + sep + url[len(localBasePath):]
-
-// 	// Skip cp when file exists, or some weird error in the file system
-// 	// occurred
-// 	if _, err := os.Stat(localPath); err == nil || !os.IsNotExist(err) {
-// 		return err
-// 	}
-
-// 	cmd := makeCmd(nil, "gsutil", "cp", url, localPath)
-// 	if err := cmd.Start(); err != nil {
-// 		return err
-// 	}
-// 	if err := cmd.Wait(); err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
-// func gsutilCatRecursive(url string, path string) (err error) {
-// 	lsOutChan := make(chan string)
-// 	lsErrChan := make(chan error)
-// 	cpErrChan := make(chan error)
-// 	go gsutilLsToChan(lsOutChan, lsErrChan, "-r", url)
-// 	go func() {
-// 		defer close(cpErrChan)
-// 		for entry := range lsOutChan {
-// 			// Skip short lines and directories
-// 			if len(entry) <= len(url) || entry[len(entry)-1] == '/' {
-// 				continue
-// 			}
-// 			cpErr := gsutilCat(url, path, entry)
-// 			if cpErr != nil {
-// 				cpErrChan <- cpErr
-// 			}
-// 		}
-// 	}()
-// 	for lsErr := range lsErrChan {
-// 		if err == nil {
-// 			err = lsErr
-// 		}
-// 	}
-// 	for cpErr := range cpErrChan {
-// 		if err == nil {
-// 			err = cpErr
-// 		}
-// 	}
-// 	return err
-// }
-
 type SubTest struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
@@ -406,25 +373,21 @@ type TestResults struct {
 	Subtests []SubTest `json:"subtests"`
 }
 
-func unmarshalTestResult(data []byte) (testResults []protos.TestResult, err error) {
-	var jsonTestResults TestResults
-	err = json.Unmarshal(data, &jsonTestResults)
-	if err != nil {
-		return testResults, err
-	}
-	// TODO: Copy jsonTestResults into testResults
-	return testResults, err
-}
-
 func hashesFromDatastore(ctx context.Context, client datastore.Client) (hashes []string, err error) {
 	query := datastore.NewQuery("TestRun").Project("Revision")
-	it := client.Run(ctx, query)
+	var it *datastore.Iterator
+	netSem.With(func() {
+		it = client.Run(ctx, query)
+	})
 
 	// Dedup hashes with map
 	seen := make(map[string]bool)
 	for {
 		var testRun models.TestRun
-		_, err := it.Next(&testRun)
+		var err error
+		netSem.With(func() {
+			_, err = it.Next(&testRun)
+		})
 		if err == iterator.Done {
 			break
 		}
@@ -443,7 +406,9 @@ func hashesFromDatastore(ctx context.Context, client datastore.Client) (hashes [
 func createdAtFromShortHashDatastore(ctx context.Context, client datastore.Client, shortHash string) (createdAt time.Time, err error) {
 	var testRuns []models.TestRun
 	query := datastore.NewQuery("TestRun").Filter("Revision=", shortHash).Project("CreatedAt").Limit(1)
-	client.GetAll(ctx, query, &testRuns)
+	netSem.With(func() {
+		client.GetAll(ctx, query, &testRuns)
+	})
 	if len(testRuns) != 1 {
 		return createdAt, errors.New("Failed to find revision in Datastore: " + shortHash)
 	}
@@ -486,9 +451,9 @@ func addPlatformToTestRun(platformStr string, testRun *protos.TestRun) (err erro
 	if len(parts) > 3 {
 		testRun.OsVersionStr = parts[3]
 	}
-	if len(parts) > 4 {
-		return errors.New("Malformed platform string")
-	}
+	// Anything after first four fragments is dropped. Sometimes
+	// additional fragments are used for, for example, the remote browser
+	// provider.
 	return nil
 }
 
@@ -551,10 +516,17 @@ func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client
 	//
 	go func() {
 		defer wg.Done()
-		it := bucket.Objects(ctx, &storage.Query{Delimiter: "/"})
+		var it *storage.ObjectIterator
+		netSem.With(func() {
+			it = bucket.Objects(ctx, &storage.Query{Delimiter: "/"})
+		})
 		hashes := make([]string, 0)
 		for {
-			attrs, err := it.Next()
+			var attrs *storage.ObjectAttrs
+			var err error
+			netSem.With(func() {
+				attrs, err = it.Next()
+			})
 			if err == iterator.Done {
 				break
 			}
@@ -602,20 +574,45 @@ func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client
 }
 
 func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, testRun protos.TestRun, objName string, resultChan chan protos.TestResult, errChan chan error) {
-	obj := bucket.Object(objName)
-	reader, err := obj.NewReader(ctx)
-	if err != nil {
-		errChan <- err
-		return
-	}
-	bytes, err := ioutil.ReadAll(reader)
-	if err != nil {
-		errChan <- err
-		return
-	}
+	var data []byte
+	netSem.With(func() {
+		var err error
+		makeError := func(err error) (error) {
+			return errors.New(err.Error() + ": " + objName)
+		}
+		obj := bucket.Object(objName)
+		reader, err := obj.NewReader(ctx)
+		if err != nil {
+			errChan <- makeError(err)
+			return
+		}
+		defer reader.Close()
+		data, err = ioutil.ReadAll(reader)
+		if err != nil {
+			errChan <- makeError(err)
+			return
+		}
+
+		if json.Valid(data) {
+			return
+		}
+
+		reader2 := bytes.NewReader(data)
+		reader3, err := gzip.NewReader(reader2)
+		if err != nil {
+			errChan <- makeError(err)
+			return
+		}
+		defer reader3.Close()
+		data, err = ioutil.ReadAll(reader3)
+		if err != nil {
+			errChan <- makeError(err)
+			return
+		}
+	})
 	var results TestResults
-	if err := json.Unmarshal(bytes, &results); err != nil {
-		errChan <- err
+	if err := json.Unmarshal(data, &results); err != nil {
+		errChan <- errors.New(err.Error() + ": " + objName + ": " + string(data))
 		return
 	}
 
@@ -665,13 +662,20 @@ func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *s
 }
 
 func processTestRunResultsRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, shortHash string, platformStr string, testRun protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
-	it := bucket.Objects(ctx, &storage.Query{
-		Prefix: shortHash + "/" + platformStr + "/",
+	var it *storage.ObjectIterator
+	netSem.With(func() {
+		it = bucket.Objects(ctx, &storage.Query{
+			Prefix: shortHash + "/" + platformStr + "/",
+		})
 	})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	for {
-		attrs, err := it.Next()
+		var attrs *storage.ObjectAttrs
+		var err error
+		netSem.With(func() {
+			attrs, err = it.Next()
+		})
 		if err == iterator.Done {
 			break
 		}
@@ -695,13 +699,20 @@ func processTestRunResultsRemote(ctx context.Context, cs *storage.Client, bucket
 func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, commit Commit, runChan chan protos.TestRun, resultChan chan protos.TestResult, errChan chan error) {
 	shortHash := commit.shortHash
 	prefix := shortHash + "/"
-	it := bucket.Objects(ctx, &storage.Query{
-		Delimiter: "/",
-		Prefix: prefix,
+	var it *storage.ObjectIterator
+	netSem.With(func() {
+		it = bucket.Objects(ctx, &storage.Query{
+			Delimiter: "/",
+			Prefix: prefix,
+		})
 	})
 	var wg sync.WaitGroup
 	for {
-		attrs, err := it.Next()
+		var attrs *storage.ObjectAttrs
+		var err error
+		netSem.With(func() {
+			attrs, err = it.Next()
+		})
 		if err == iterator.Done {
 			break
 		}
@@ -820,36 +831,109 @@ func main() {
 	wptPath := flag.String("wpt_path", os.Getenv("HOME")+"/web-platform-tests", "Path to Web Platform Tests repository")
 	// dataPath := flag.String("data_path", os.Getenv("HOME")+"/wpt-data", "Path to data directory for local data copied from Google Cloud Storage")
 	projectId := flag.String("project_id", "wptdashboard", "Google Cloud Platform project id")
+	bqDataSet := flag.String("bq_data_set", "wptd", "BigQuery dataset to output to")
+	maxConnections := flag.Int("max_connections", 1000, "Maximum concurrent https connections over network-based APIs")
 
-	ctx := context.Background()
-	ds, err := datastore.NewClient(ctx, *projectId)
+	var err error
+
+	_, err = os.Stat(*wptPath)
+	if os.IsNotExist(err) {
+		basePath := (*wptPath) + "/.."
+		cmd := makeCmd(&basePath, "git", "clone", "https://github.com/w3c/web-platform-tests.git")
+		if err = cmd.Start(); err != nil {
+			log.Fatal(err)
+		}
+		if err = cmd.Wait(); err != nil {
+			log.Fatal(err)
+		}
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
-	cs, err := storage.NewClient(ctx, option.WithoutAuthentication())
+
+	netSem = make(CountingSemaphore, *maxConnections)
+
+	ctx := context.Background()
+	var ds *datastore.Client
+	netSem.With(func() {
+		ds, err = datastore.NewClient(ctx, *projectId)
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var cs *storage.Client
+	netSem.With(func() {
+		cs, err = storage.NewClient(ctx, option.WithoutAuthentication())
+	})
 	bucket := cs.Bucket("wptd")
 
 	commits := getCommitsRemote(wptPath, ctx, ds, cs, bucket)
 	runChan, resultChan, errChan := processCommitsRemote(ctx, cs, bucket, commits)
 
+	var bq *bigquery.Client
+	netSem.With(func() {
+		bq, err = bigquery.NewClient(ctx, *projectId)
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	dataset := bq.Dataset(*bqDataSet)
+	tableSuffix := strconv.FormatInt(time.Now().Unix(), 10)
+
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func(c chan protos.TestRun) {
 		defer wg.Done()
-		for v := range c {
-			log.Println(v)
+		testRuns := make([]protos.TestRun, 0)
+		for testRun := range c {
+			testRuns = append(testRuns, testRun)
 		}
+
+		schema, err := bigquery.InferSchema(protos.TestRun{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		table := dataset.Table("TestRuns" + tableSuffix, )
+		netSem.With(func() {
+			if err := table.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+				log.Fatal(err)
+			}
+		})
+		uploader := table.Uploader()
+		netSem.With(func() {
+			if err := uploader.Put(ctx, testRuns); err != nil {
+				log.Fatal(err)
+			}
+		})
 	}(runChan)
 	go func(c chan protos.TestResult) {
 		defer wg.Done()
-		for v := range c {
-			log.Println(v)
+		testResults := make([]protos.TestResult, 0)
+		for testResult := range c {
+			testResults = append(testResults, testResult)
 		}
+
+		schema, err := bigquery.InferSchema(protos.TestResult{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		table := dataset.Table("TestResults" + tableSuffix)
+		netSem.With(func() {
+			if err := table.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+				log.Fatal(err)
+			}
+		})
+		uploader := table.Uploader()
+		netSem.With(func() {
+			if err := uploader.Put(ctx, testResults); err != nil {
+				log.Fatal(err)
+			}
+		})
 	}(resultChan)
 	go func(c chan error) {
 		defer wg.Done()
-		for v := range c {
-			log.Println(v)
+		for err := range c {
+			log.Printf("Pipeline error: %s", err)
 		}
 	}(errChan)
 	wg.Wait()
