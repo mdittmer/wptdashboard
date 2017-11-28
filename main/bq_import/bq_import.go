@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "cloud.google.com/go/bigquery"
 	"bufio"
 	"bytes"
 	"compress/gzip"
@@ -31,9 +30,11 @@ import (
 	"google.golang.org/api/option"
 )
 
-type Nothing struct {}
+type Nothing struct{}
 type CountingSemaphore chan Nothing
+
 var netSem CountingSemaphore
+
 type VoidFunc func()
 
 func (s CountingSemaphore) Acquire() {
@@ -41,7 +42,7 @@ func (s CountingSemaphore) Acquire() {
 }
 
 func (s CountingSemaphore) Release() {
-	<- s
+	<-s
 }
 
 func (s CountingSemaphore) With(f VoidFunc) {
@@ -361,8 +362,8 @@ func hashesToCommits(wptPath string, hashes []string) (commits []*Commit) {
 }
 
 type SubTest struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
+	Name    string  `json:"name"`
+	Status  string  `json:"status"`
 	Message *string `json:"message"`
 }
 
@@ -468,7 +469,7 @@ func addCommitToTestRun(commit Commit, testRun *protos.TestRun) (err error) {
 
 type TestRun struct {
 	platformStr string
-	testRun protos.TestRun
+	testRun     protos.TestRun
 }
 
 func testRunsFromDataPath(dataPath string, hash string) (testRuns []TestRun, err error) {
@@ -489,7 +490,7 @@ func testRunsFromDataPath(dataPath string, hash string) (testRuns []TestRun, err
 	return testRuns, err
 }
 
-func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client, cs *storage.Client, bucket *storage.BucketHandle) ([]Commit) {
+func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client, cs *storage.Client, bucket *storage.BucketHandle) []Commit {
 	//
 	// Wait for both commitsDS and commitsCS
 	//
@@ -574,12 +575,12 @@ func getCommitsRemote(wptPath *string, ctx context.Context, ds *datastore.Client
 }
 
 func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *storage.BucketHandle, testRun protos.TestRun, objName string, resultChan chan protos.TestResult, errChan chan error) {
+	makeError := func(err error) error {
+		return errors.New(err.Error() + ": " + objName)
+	}
 	var data []byte
 	netSem.With(func() {
 		var err error
-		makeError := func(err error) (error) {
-			return errors.New(err.Error() + ": " + objName)
-		}
 		obj := bucket.Object(objName)
 		reader, err := obj.NewReader(ctx)
 		if err != nil {
@@ -592,11 +593,11 @@ func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *s
 			errChan <- makeError(err)
 			return
 		}
+	})
 
-		if json.Valid(data) {
-			return
-		}
-
+	var results TestResults
+	var anyResult interface{}
+	if err := json.Unmarshal(data, &anyResult); err != nil {
 		reader2 := bytes.NewReader(data)
 		reader3, err := gzip.NewReader(reader2)
 		if err != nil {
@@ -609,54 +610,53 @@ func catAndDecodeObjectRemote(ctx context.Context, cs *storage.Client, bucket *s
 			errChan <- makeError(err)
 			return
 		}
-	})
-	var results TestResults
+	}
 	if err := json.Unmarshal(data, &results); err != nil {
-		errChan <- errors.New(err.Error() + ": " + objName + ": " + string(data))
+		errChan <- makeError(err)
 		return
 	}
 
 	statusName := strings.ToUpper(results.Status)
-	status := protos.TestStatus(protos.TestStatus_value["TEST_" + statusName])
+	status := protos.TestStatus(protos.TestStatus_value["TEST_"+statusName])
 	var message string
 	if results.Message == nil {
 		message = ""
 	} else {
 		message = *results.Message
 	}
-	resultChan <- protos.TestResult {
-		Os: testRun.Os,
-		OsVersionStr: testRun.OsVersionStr,
-		Browser: testRun.Browser,
+	resultChan <- protos.TestResult{
+		Os:                testRun.Os,
+		OsVersionStr:      testRun.OsVersionStr,
+		Browser:           testRun.Browser,
 		BrowserVersionStr: testRun.BrowserVersionStr,
-		WptHash: testRun.WptHash,
-		WptCommitTime: testRun.WptCommitTime,
-		TestName: results.Test,
-		Status: status,
-		TestMessage: message,
+		WptHash:           testRun.WptHash,
+		WptCommitTime:     testRun.WptCommitTime,
+		TestName:          results.Test,
+		Status:            status,
+		TestMessage:       message,
 	}
 	for _, subTest := range results.Subtests {
 		subStatusName := strings.ToUpper(subTest.Status)
-		subStatus := protos.SubTestStatus(protos.SubTestStatus_value["SUB_TEST_" + subStatusName])
+		subStatus := protos.SubTestStatus(protos.SubTestStatus_value["SUB_TEST_"+subStatusName])
 		var subMessage string
 		if subTest.Message == nil {
 			subMessage = ""
 		} else {
 			subMessage = *subTest.Message
 		}
-		resultChan <- protos.TestResult {
-			Os: testRun.Os,
-			OsVersionStr: testRun.OsVersionStr,
-			Browser: testRun.Browser,
+		resultChan <- protos.TestResult{
+			Os:                testRun.Os,
+			OsVersionStr:      testRun.OsVersionStr,
+			Browser:           testRun.Browser,
 			BrowserVersionStr: testRun.BrowserVersionStr,
-			WptHash: testRun.WptHash,
-			WptCommitTime: testRun.WptCommitTime,
-			TestName: results.Test,
-			Status: status,
-			TestMessage: message,
-			TestSubName: subTest.Name,
-			TestSubStatus: subStatus,
-			TestSubMessage: subMessage,
+			WptHash:           testRun.WptHash,
+			WptCommitTime:     testRun.WptCommitTime,
+			TestName:          results.Test,
+			Status:            status,
+			TestMessage:       message,
+			TestSubName:       subTest.Name,
+			TestSubStatus:     subStatus,
+			TestSubMessage:    subMessage,
 		}
 	}
 }
@@ -703,7 +703,7 @@ func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storag
 	netSem.With(func() {
 		it = bucket.Objects(ctx, &storage.Query{
 			Delimiter: "/",
-			Prefix: prefix,
+			Prefix:    prefix,
 		})
 	})
 	var wg sync.WaitGroup
@@ -724,7 +724,7 @@ func processCommitRemote(ctx context.Context, cs *storage.Client, bucket *storag
 		// seek.
 		if attrs.Prefix != "" {
 			// Drop trailing slash
-			platformStr := attrs.Prefix[len(prefix):len(attrs.Prefix)-1]
+			platformStr := attrs.Prefix[len(prefix) : len(attrs.Prefix)-1]
 			var testRun protos.TestRun
 			if err := addPlatformToTestRun(platformStr, &testRun); err != nil {
 				errChan <- err
@@ -801,7 +801,7 @@ func processCommitsLocal(dataPath *string, commits []Commit) {
 			// }
 
 			findErrors := make(chan error)
-			find := makeChanCmd(nil, "find", *dataPath + "/" + commit.shortHash + "/" + testRun.platformStr, "-type", "f")
+			find := makeChanCmd(nil, "find", *dataPath+"/"+commit.shortHash+"/"+testRun.platformStr, "-type", "f")
 			find.Start(findErrors)
 			find.Wait(findErrors)
 
@@ -893,7 +893,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		table := dataset.Table("TestRuns" + tableSuffix, )
+		table := dataset.Table("TestRuns" + tableSuffix)
 		netSem.With(func() {
 			if err := table.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
 				log.Fatal(err)
