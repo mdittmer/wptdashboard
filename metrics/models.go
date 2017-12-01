@@ -187,9 +187,9 @@ type TestRunStatus struct {
 }
 
 type MetricsRun struct {
-	StartTime *time.Time    `json:"start_time"`
-	EndTime   *time.Time    `json:"end_time"`
-	TestRuns  *TestRunSlice `json:"test_runs"`
+	StartTime time.Time      `json:"start_time"`
+	EndTime   time.Time      `json:"end_time"`
+	TestRuns  []base.TestRun `json:"test_runs"`
 }
 
 // Output type for metrics: Include runs as metadata, and arbitrary content
