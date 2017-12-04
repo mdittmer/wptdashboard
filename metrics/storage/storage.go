@@ -130,6 +130,10 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 	}
 	gcsMetadata := DatastoreMetadata{name, *metricsRun}
 	metadataType := reflect.TypeOf(metadata)
+	for metadataType.Kind() == reflect.Ptr {
+		metadataType = reflect.Indirect(reflect.ValueOf(
+			metadata)).Type()
+	}
 	metadataKindName := fmt.Sprintf("%s.%s",
 		strings.Replace(metadataType.PkgPath(), "/", ".", -1),
 		metadataType.Name())
