@@ -61,9 +61,11 @@ func init() {
 	outputGcsBucket = flag.String("output_gcs_bucket", "wptd-metrics",
 		"Google Cloud Storage bucket where metrics are stored")
 	outputBQMetadataDataset = flag.String("output_bq_metadata_dataset",
-		"wptd", "BigQuery dataset where metrics metadata are stored")
+		fmt.Sprintf("wptd_metrics_%d", unixNow),
+		"BigQuery dataset where metrics metadata are stored")
 	outputBQDataDataset = flag.String("output_bq_data_dataset",
-		"wptd", "BigQuery dataset where metrics data are stored")
+		fmt.Sprintf("wptd_metrics_%d", unixNow),
+		"BigQuery dataset where metrics data are stored")
 	outputBQMetadataTable = flag.String("output_bq_metadata_table",
 		"MetricsRuns", "BigQuery table where metrics metadata are stored")
 	outputBQPassRateTable = flag.String("output_bq_pass_rate_table",
@@ -261,21 +263,23 @@ func getRuns() []base.TestRun {
 func failureListsToRows(browserName string, failureLists [][]*metrics.TestId) (
 	rows []interface{}) {
 	type FailureListsRow struct {
-		BrowserName      string           `json:"browser_name"`
-		NumOtherFailures int              `json:"num_other_failures"`
-		Tests            []metrics.TestId `json:"tests"`
+		BrowserName      string         `json:"browser_name"`
+		NumOtherFailures int            `json:"num_other_failures"`
+		Tests            metrics.TestId `json:"test"`
 	}
-	rows = make([]interface{}, 0, len(failureLists))
+	numRows := 0
+	for _, failureList := range failureLists {
+		numRows += len(failureList)
+	}
+	rows = make([]interface{}, 0, numRows)
 	for i, failuresPtrList := range failureLists {
-		failureList := make([]metrics.TestId, 0, len(failuresPtrList))
-		for _, ptr := range failuresPtrList {
-			failureList = append(failureList, *ptr)
+		for _, failure := range failuresPtrList {
+			rows = append(rows, FailureListsRow{
+				browserName,
+				i,
+				*failure,
+			})
 		}
-		rows = append(rows, FailureListsRow{
-			browserName,
-			i,
-			failureList,
-		})
 	}
 	return rows
 }
