@@ -71,13 +71,6 @@ type GCSData struct {
 	Data     []interface{} `json:"data"`
 }
 
-type DatastoreMetadata struct {
-	DataURL string
-	// TODO: This isn't flexible enough to support different kinds of
-	// metadata.
-	Metadata metrics.MetricsRun
-}
-
 type BQDataset struct {
 	Name    string
 	Dataset *bigquery.Dataset
@@ -128,7 +121,6 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 			errors.New("Unknown metadata type"),
 		}
 	}
-	gcsMetadata := DatastoreMetadata{name, *metricsRun}
 	metadataType := reflect.TypeOf(metadata)
 	for metadataType.Kind() == reflect.Ptr {
 		metadataType = reflect.Indirect(reflect.ValueOf(
@@ -138,7 +130,7 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 		strings.Replace(metadataType.PkgPath(), "/", ".", -1),
 		metadataType.Name())
 	metadataKey := datastore.IncompleteKey(metadataKindName, nil)
-	_, err := ctx.Client.Put(ctx.Context, metadataKey, &gcsMetadata)
+	_, err := ctx.Client.Put(ctx.Context, metadataKey, metricsRun)
 	if err != nil {
 		log.Printf("Error writing %s to Datastore: %v\n",
 			name, err)
