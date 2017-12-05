@@ -28,5 +28,6 @@ func init() {
 	http.HandleFunc("/api/runs", apiTestRunsHandler)
 	http.HandleFunc("/api/run", apiTestRunHandler)
 	http.HandleFunc("/results", resultsRedirectHandler)
+	http.HandleFunc("/metrics", metricsHandler)
 	http.HandleFunc("/", testHandler)
 }
