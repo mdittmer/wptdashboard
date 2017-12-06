@@ -115,12 +115,6 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 	dataWritten = data
 
 	log.Printf("Writing %s to Datastore\n", name)
-	metricsRun, ok := metadata.(*metrics.MetricsRun)
-	if !ok {
-		return nil, make([]interface{}, 0), []error{
-			errors.New("Unknown metadata type"),
-		}
-	}
 	metadataType := reflect.TypeOf(metadata)
 	for metadataType.Kind() == reflect.Ptr {
 		metadataType = reflect.Indirect(reflect.ValueOf(
@@ -130,7 +124,24 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 		strings.Replace(metadataType.PkgPath(), "/", ".", -1),
 		metadataType.Name())
 	metadataKey := datastore.IncompleteKey(metadataKindName, nil)
-	_, err := ctx.Client.Put(ctx.Context, metadataKey, metricsRun)
+
+	// TODO: This is terrible, but Datastore doesn't use reflection, so the
+	// metadata must be of a concrete struct type.
+	var err error = nil
+	passRateMetadata, ok := metadata.(*metrics.PassRateMetadata)
+	if !ok {
+		failuresMetadata, ok := metadata.(*metrics.FailuresMetadata)
+		if !ok {
+			return nil, make([]interface{}, 0), []error{
+				errors.New("Unknown metadata type"),
+			}
+		}
+		_, err = ctx.Client.Put(ctx.Context, metadataKey,
+			failuresMetadata)
+	} else {
+		_, err = ctx.Client.Put(ctx.Context, metadataKey,
+			passRateMetadata)
+	}
 	if err != nil {
 		log.Printf("Error writing %s to Datastore: %v\n",
 			name, err)
