@@ -58,5 +58,6 @@ func init() {
 	http.HandleFunc("/api/runs", decorate(apiTestRunsHandler))
 	http.HandleFunc("/api/run", decorate(apiTestRunHandler))
 	http.HandleFunc("/results", decorate(resultsRedirectHandler))
+	http.HandleFunc("/metrics", decorate(metricsHandler))
 	http.HandleFunc("/", decorate(testHandler))
 }
