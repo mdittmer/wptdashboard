@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -36,6 +35,10 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/api/iterator"
 )
+
+func NewCloudDatastoreKey(data interface{}) *datastore.Key {
+	return datastore.IncompleteKey(metrics.GetDatastoreKindName(data), nil)
+}
 
 type OutputLocation struct {
 	GCSObjectPath string
@@ -121,15 +124,7 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 			errors.New("Unknown metadata type"),
 		}
 	}
-	metadataType := reflect.TypeOf(metadata)
-	for metadataType.Kind() == reflect.Ptr {
-		metadataType = reflect.Indirect(reflect.ValueOf(
-			metadata)).Type()
-	}
-	metadataKindName := fmt.Sprintf("%s.%s",
-		strings.Replace(metadataType.PkgPath(), "/", ".", -1),
-		metadataType.Name())
-	metadataKey := datastore.IncompleteKey(metadataKindName, nil)
+	metadataKey := NewCloudDatastoreKey(metadata)
 	_, err := ctx.Client.Put(ctx.Context, metadataKey, metricsRun)
 	if err != nil {
 		log.Printf("Error writing %s to Datastore: %v\n",
