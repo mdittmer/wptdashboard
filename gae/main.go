@@ -17,17 +17,46 @@ package gae
 import (
 	"html/template"
 	"net/http"
+
+	"google.golang.org/appengine"
 )
 
 var templates = template.Must(template.ParseGlob("templates/*.html"))
 
+// TODO: Figure out how to access Datastore during app init phase to avoid
+// need for lazy-load-on-first-request.
+var devDataLoaded bool = false
+
+func handleDev(h func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !devDataLoaded {
+			EnsureDevData(appengine.NewContext(r))
+			devDataLoaded = true
+		}
+		h(w, r)
+	}
+	return handler
+}
+func handleProd(h func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		h(w, r)
+	}
+	return handler
+}
+
 func init() {
-	http.HandleFunc("/test-runs", testRunsHandler)
-	http.HandleFunc("/about", aboutHandler)
-	http.HandleFunc("/api/diff", apiDiffHandler)
-	http.HandleFunc("/api/runs", apiTestRunsHandler)
-	http.HandleFunc("/api/run", apiTestRunHandler)
-	http.HandleFunc("/results", resultsRedirectHandler)
-	http.HandleFunc("/metrics", metricsHandler)
-	http.HandleFunc("/", testHandler)
+	var decorate func(func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request)
+	if appengine.IsDevAppServer() {
+		decorate = handleDev
+	} else {
+		decorate = handleProd
+	}
+
+	http.HandleFunc("/test-runs", decorate(testRunsHandler))
+	http.HandleFunc("/about", decorate(aboutHandler))
+	http.HandleFunc("/api/diff", decorate(apiDiffHandler))
+	http.HandleFunc("/api/runs", decorate(apiTestRunsHandler))
+	http.HandleFunc("/api/run", decorate(apiTestRunHandler))
+	http.HandleFunc("/results", decorate(resultsRedirectHandler))
+	http.HandleFunc("/", decorate(testHandler))
 }
