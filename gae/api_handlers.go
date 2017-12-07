@@ -163,7 +163,6 @@ func apiTestRunPostHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// Fetch pre-uploaded models.Token entity.
-	// Fetch pre-uploaded modles.Token entity.
 	suppliedSecret := r.URL.Query().Get("secret")
 	tokenKey := datastore.NewKey(ctx, "Token", "upload-token", 0, nil)
 	var token models.Token
