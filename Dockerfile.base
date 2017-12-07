@@ -93,6 +93,7 @@ RUN curl -L -o "protoc.zip" "https://github.com/google/protobuf/releases/downloa
 
 # Install protobuf BigQuery schema generator
 WORKDIR /
+RUN go get github.com/GoogleCloudPlatform/protoc-gen-bq-schema/protos
 RUN git clone "https://github.com/GoogleCloudPlatform/protoc-gen-bq-schema.git" && \
     cd "protoc-gen-bq-schema" && \
     make && \
