@@ -27,10 +27,12 @@ import (
 
 func EnsureDevData(ctx context.Context) {
 	tokens := []interface{}{&base.Token{}}
-	urlFmtString := "http://localhost:8080/static/wptd/%s/%s"
 	timeZero := time.Unix(0, 0)
-	mkURL := func(hash string, summaryJsonGz string) string {
-		return fmt.Sprintf(urlFmtString, hash, summaryJsonGz)
+
+	// Follow pattern established in run/*.py data collection code.
+	summaryUrlFmtString := "http://localhost:8080/static/wptd/%s/%s"
+	mkSummaryUrl := func(hash string, summaryJsonGz string) string {
+		return fmt.Sprintf(summaryUrlFmtString, hash, summaryJsonGz)
 	}
 	properTestRuns := []base.TestRun{
 		base.TestRun{
@@ -39,7 +41,7 @@ func EnsureDevData(ctx context.Context) {
 			"linux",
 			"3.16",
 			"b952881825",
-			mkURL("b952881825", "chrome-63.0-linux-summary.json.gz"),
+			mkSummaryUrl("b952881825", "chrome-63.0-linux-summary.json.gz"),
 			timeZero,
 		},
 		base.TestRun{
@@ -48,7 +50,7 @@ func EnsureDevData(ctx context.Context) {
 			"windows",
 			"10",
 			"5d55258739",
-			mkURL("5d55258739", "windows-10-sauce-summary.json.gz"),
+			mkSummaryUrl("5d55258739", "windows-10-sauce-summary.json.gz"),
 			timeZero,
 		},
 		base.TestRun{
@@ -57,7 +59,7 @@ func EnsureDevData(ctx context.Context) {
 			"linux",
 			"*",
 			"fc70df1f75",
-			mkURL("fc70df1f75", "firefox-57.0-linux-summary.json.gz"),
+			mkSummaryUrl("fc70df1f75", "firefox-57.0-linux-summary.json.gz"),
 			timeZero,
 		},
 		base.TestRun{
@@ -66,29 +68,72 @@ func EnsureDevData(ctx context.Context) {
 			"macos",
 			"10.12",
 			"fc2e57a502",
-			mkURL("fc2e57a502", "safari-11.0-macos-10.12-sauce-summary.json.gz"),
+			mkSummaryUrl("fc2e57a502", "safari-11.0-macos-10.12-sauce-summary.json.gz"),
 			timeZero,
 		},
+	}
+	// Follow pattern established in metrics/run/*.go data collection code.
+	metricsUrlFmtString := fmt.Sprintf(
+		"http://localhost:8080/static/wptd-metrics/%d-%d",
+		timeZero.Unix(), timeZero.Unix()) + "/%s.json.gz"
+	mkMetricsUrl := func(baseName string) string {
+		return fmt.Sprintf(metricsUrlFmtString, baseName)
 	}
 	testRuns := make([]interface{}, len(properTestRuns))
 	for i, testRun := range properTestRuns {
 		testRuns[i] = &testRun
 	}
-	metricsRuns := []interface{}{
-		&metrics.MetricsRun{
+	passRateMetadata := []interface{}{
+		&metrics.PassRateMetadata{
 			timeZero,
 			timeZero,
 			properTestRuns,
+			mkMetricsUrl("pass-rate"),
+		},
+	}
+
+	failuresMetadata := []interface{}{
+		&metrics.FailuresMetadata{
+			timeZero,
+			timeZero,
+			properTestRuns,
+			mkMetricsUrl("chrome-failures"),
+			"chrome",
+		},
+		&metrics.FailuresMetadata{
+			timeZero,
+			timeZero,
+			properTestRuns,
+			mkMetricsUrl("edge-failures"),
+			"edge",
+		},
+		&metrics.FailuresMetadata{
+			timeZero,
+			timeZero,
+			properTestRuns,
+			mkMetricsUrl("firefox-failures"),
+			"firefox",
+		},
+		&metrics.FailuresMetadata{
+			timeZero,
+			timeZero,
+			properTestRuns,
+			mkMetricsUrl("safari-failures"),
+			"safari",
 		},
 	}
 
 	tokenKindName := "Token"
 	testRunKindName := "TestRun"
-	metricsRunKindName := metrics.GetDatastoreKindName(metrics.MetricsRun{})
+	passRateMetadataKindName := metrics.GetDatastoreKindName(
+		metrics.PassRateMetadata{})
+	failuresMetadataKindName := metrics.GetDatastoreKindName(
+		metrics.FailuresMetadata{})
 
 	ensureDataByCount(ctx, tokenKindName, tokens)
 	ensureDataByCount(ctx, testRunKindName, testRuns)
-	ensureDataByCount(ctx, metricsRunKindName, metricsRuns)
+	ensureDataByCount(ctx, passRateMetadataKindName, passRateMetadata)
+	ensureDataByCount(ctx, failuresMetadataKindName, failuresMetadata)
 }
 
 func ensureDataByCount(ctx context.Context, kindName string, data []interface{}) {
