@@ -32,30 +32,13 @@ limitations under the License.
 
       static get properties () {
         return {
-	  metadata: {
-	    type: Object
-	  }
+	  metadata: Object
         }
       }
 
       async connectedCallback () {
         await super.connectedCallback()
-      }
-
-      _metricsUrlBase () {
-	if (this.metricsURLBase_) {
-	  return this.metricsURLBase_;
-	}
-	const startDate = Date.parse(this.metadata.start_date).getTime() / 1000;
-	const endDate = Date.parse(this.metadata.end_date).getTime() / 1000;
-
-	return `${startDate}-${endDate}`;
-      }
-
-      _metricsUrlProtocolAndHost () {
-	if (this.metricsUrlProtocolAndHost_) {
-	  return metricsUrlProtocolAndHost_;
-	}
+	console.log(this.metadata)
       }
     }
 

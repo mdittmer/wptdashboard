@@ -27,9 +27,10 @@ import (
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := appengine.NewContext(r)
 	query := datastore.
-		NewQuery("github.com.w3c.wptdashboard.metrics.MetricsRun").
+		NewQuery(metrics.GetDatastoreKindName(
+			metrics.PassRateMetadata{})).
 		Order("-StartTime").Limit(1)
-	var metadataSlice []metrics.MetricsRun
+	var metadataSlice []metrics.PassRateMetadata
 
 	if _, err := query.GetAll(ctx, &metadataSlice); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
