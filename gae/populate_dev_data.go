@@ -30,7 +30,7 @@ func EnsureDevData(ctx context.Context) {
 	timeZero := time.Unix(0, 0)
 
 	// Follow pattern established in run/*.py data collection code.
-	summaryUrlFmtString := "http://localhost:8080/static/wptd/%s/%s"
+	summaryUrlFmtString := "/static/wptd/%s/%s"
 	mkSummaryUrl := func(hash string, summaryJsonGz string) string {
 		return fmt.Sprintf(summaryUrlFmtString, hash, summaryJsonGz)
 	}
@@ -74,7 +74,7 @@ func EnsureDevData(ctx context.Context) {
 	}
 	// Follow pattern established in metrics/run/*.go data collection code.
 	metricsUrlFmtString := fmt.Sprintf(
-		"http://localhost:8080/static/wptd-metrics/%d-%d",
+		"/static/wptd-metrics/%d-%d",
 		timeZero.Unix(), timeZero.Unix()) +
 		// Use unzipped JSON for local dev.
 		"/%s.json"
