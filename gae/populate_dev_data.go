@@ -88,7 +88,7 @@ func EnsureDevData(ctx context.Context) {
 			timeZero,
 			timeZero,
 			properTestRuns,
-			mkMetricsUrl("pass-rate"),
+			mkMetricsUrl("pass-rates"),
 		},
 	}
 
