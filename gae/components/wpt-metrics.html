@@ -32,14 +32,21 @@ limitations under the License.
 
       static get properties () {
         return {
-	  metadata: Object
+          metadata: Object
         }
       }
 
       async connectedCallback () {
         await super.connectedCallback()
-	console.log(this.metadata)
+        let metrics = await this._fetchMetrics(this.metadata.url)
+        console.log(metrics)
+    }
+
+      async _fetchMetrics (url) {
+        const response = await window.fetch(url)
+        return await response.json()
       }
+
     }
 
     window.customElements.define(WPTMetrics.is, WPTMetrics)
