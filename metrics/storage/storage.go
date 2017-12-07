@@ -37,6 +37,10 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+func NewCloudDatastoreKey(data interface{}) *datastore.Key {
+	return datastore.IncompleteKey(metrics.GetDatastoreKindName(data), nil)
+}
+
 type OutputLocation struct {
 	GCSObjectPath string
 	BQDatasetName string
