@@ -195,7 +195,7 @@ limitations under the License.
           allMetrics: Object,
           metrics: {
             type: Object,
-            computed: '_computeMetrics(path, pathIsATestFile, allMetrics)'
+            computed: '_computeMetrics(path, pathIsATestFile, query, allMetrics)'
           },
           path: {
             type: String,
@@ -213,6 +213,10 @@ limitations under the License.
           thLabels: {
             type: Array,
             computed: '_computeThLabels(allMetrics)'
+          },
+          _queryTimeoutId: {
+            type: Number,
+            value: 0
           }
         }
       }
@@ -225,10 +229,6 @@ limitations under the License.
       async _fetchMetrics (url) {
         const response = await window.fetch(url)
         return await response.json()
-      }
-
-      _queryChanged () {
-        // TODO: Implement querying
       }
 
       _splitIntoLinkedParts (path) {
@@ -250,8 +250,9 @@ limitations under the License.
           return
         }
         this.path = path
-        this._refreshDisplayedNodes()
-        window.history.pushState({}, '', `/metrics${path}`)
+
+        // Clear query when navigating to a new path.
+        this._navigateTo(this.path, '')
 
         // Send Google Analytics pageview event
         if ('ga' in window) {
@@ -259,8 +260,14 @@ limitations under the License.
         }
       }
 
-      _refreshDisplayedNodes () {
-        // TODO: Implement display update in response to query change
+      _navigateTo(path, query) {
+        if (!query) {
+          window.history.pushState({}, '', `/metrics${path}`)
+          return
+        }
+
+        const encodedQuery = window.encodeURIComponent(query)
+        window.history.pushState({}, '', `/metrics${path}?q=${encodedQuery}`)
       }
 
       _computePathIsATestFile (path) {
@@ -279,7 +286,7 @@ limitations under the License.
         return labels
       }
 
-      _computeMetrics (path, pathIsATestFile, allMetrics) {
+      _computeMetrics (path, pathIsATestFile, query, allMetrics) {
         if (!path || !allMetrics) {
           return null
         }
@@ -293,17 +300,20 @@ limitations under the License.
             metadata: allMetrics.metadata,
             data: allMetrics.data
                 .filter(this._filterNode.bind(this,
-                        path === '/' ? path : `${this.path}/`))
+                        path === '/' ? path : `${this.path}/`, query))
           }
         }
       }
 
-      _filterNode (path, node) {
+      _filterNode (path, query, node) {
         const dir = node.dir;
         if (dir.indexOf(path) !== 0) {
           return false;
         }
         if (dir.substr(path.length).indexOf('/') !== -1) {
+          return false;
+        }
+        if (query && dir.indexOf(query) === -1) {
           return false;
         }
         return true;
@@ -317,6 +327,19 @@ limitations under the License.
         const fraction = passRate / node.total
         const rounded = Math.round(fraction * 1000) / 1000
         return `background-color: rgba(170, 136, 255, ${rounded})`
+      }
+
+      _queryChanged () {
+        if (this._queryTimeoutId) {
+          window.clearTimeout(this._queryTimeoutId)
+        }
+        this._queryTimeoutId = window.setTimeout(
+            this._updateQueryState.bind(this),
+            500)
+      }
+
+      _updateQueryState () {
+        this._navigateTo(this.path, this.query)
       }
     }
 
