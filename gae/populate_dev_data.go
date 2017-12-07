@@ -75,7 +75,9 @@ func EnsureDevData(ctx context.Context) {
 	// Follow pattern established in metrics/run/*.go data collection code.
 	metricsUrlFmtString := fmt.Sprintf(
 		"http://localhost:8080/static/wptd-metrics/%d-%d",
-		timeZero.Unix(), timeZero.Unix()) + "/%s.json.gz"
+		timeZero.Unix(), timeZero.Unix()) +
+		// Use unzipped JSON for local dev.
+		"/%s.json"
 	mkMetricsUrl := func(baseName string) string {
 		return fmt.Sprintf(metricsUrlFmtString, baseName)
 	}
