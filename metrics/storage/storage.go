@@ -103,6 +103,15 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 	log.Printf("Writing %s to Google Cloud Storage\n", name)
 	gcsData := GCSData{metadata, data}
 	obj := ctx.Bucket.Handle.Object(id.DataLocation.GCSObjectPath)
+	_, err := obj.Update(ctx.Context, storage.ObjectAttrsToUpdate{
+		ContentEncoding: "gzip",
+	})
+	if err != nil {
+		log.Printf("Error setting new Google Cloud Storage object Content-Encoding to \"gzip\": %v",
+			err)
+		errs = append(errs, err)
+		return nil, make([]interface{}, 0), errs
+	}
 	objWriter := obj.NewWriter(ctx.Context)
 	defer objWriter.Close()
 	gzWriter := gzip.NewWriter(objWriter)
@@ -131,7 +140,7 @@ func (ctx GCSDatastoreContext) Output(id OutputId, metadata interface{},
 
 	// TODO: This is terrible, but Datastore doesn't use reflection, so the
 	// metadata must be of a concrete struct type.
-	var err error = nil
+	err = nil
 	passRateMetadata, ok := metadata.(*metrics.PassRateMetadata)
 	if !ok {
 		failuresMetadata, ok := metadata.(*metrics.FailuresMetadata)
