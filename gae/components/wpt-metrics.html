@@ -122,9 +122,8 @@ limitations under the License.
 
     <section class="search">
       <input
-        value="{{query::input}}"
-        class="query"
-        placeholder="Search test files, like cors/allow-headers.htm">
+        value="{{ query::input }}"
+        class="query">
       <div class="path">
         <a href="/metrics/" on-click="_navigate">WPT</a>
         <template is="dom-repeat" items="{{ _splitIntoLinkedParts(path) }}" as="part">
@@ -185,7 +184,19 @@ limitations under the License.
 
   <script>
     const urlToMetricsPath =
-        url => url.pathname.replace(/\/metrics(.+)(\/)?$/, '$1')
+      url => url.pathname.replace(/\/metrics(.+)(\/)?$/, '$1')
+    const urlToQuery = url => {
+      // Drop initial "?" from url.search.
+      const search = url.search
+      if (!search) {
+        return ''
+      }
+      const match = search.match(/[^a-zA-Z0-9%]q=([^&]+)/)
+      if (!match) {
+        return ''
+      }
+      return match[1]
+    }
     class WPTMetrics extends window.Polymer.Element {
       static get is () { return 'wpt-metrics' }
 
@@ -195,15 +206,20 @@ limitations under the License.
           allMetrics: Object,
           metrics: {
             type: Object,
-            computed: '_computeMetrics(path, pathIsATestFile, query, allMetrics)'
+            computed: '_computeMetrics(path, pathIsATestFile, query, allMetrics, currentNode)'
           },
           path: {
             type: String,
             value: urlToMetricsPath(window.location)
           },
+          currentNode: {
+            type: Object,
+            observer: '_currentNodeChanged',
+            computed: '_computeCurrentNode(allMetrics, path)'
+          },
           query: {
             type: String,
-            value: '',
+            value: urlToQuery(window.location),
             observer: '_queryChanged'
           },
           pathIsATestFile: {
@@ -287,7 +303,7 @@ limitations under the License.
         return labels
       }
 
-      _computeMetrics (path, pathIsATestFile, query, allMetrics) {
+      _computeMetrics (path, pathIsATestFile, query, allMetrics, currentNode) {
         if (!path || !allMetrics) {
           return null
         }
@@ -297,6 +313,7 @@ limitations under the License.
             data: allMetrics.data.filter(node => node.dir === path)
           }
         } else {
+          console.log('_computeMetrics', this._shouldQueryAll())
           return {
             metadata: allMetrics.metadata,
             data: allMetrics.data
@@ -311,14 +328,22 @@ limitations under the License.
         if (dir.indexOf(path) !== 0) {
           return false;
         }
+
         const subdir = dir.substr(path.length)
-        if (subdir.indexOf('/') !== -1) {
-          return false;
+        if (!query) {
+          return subdir.indexOf('/') === -1
         }
-        if (query && subdir.indexOf(query) === -1) {
-          return false;
+
+        let test;
+        try {
+          const re = new RegExp(query.replace(/\//g, '\\/'), 'i')
+          test = re.test.bind(re)
+        } catch (e) {
+          test = str => str.indexOf(query) !== -1
         }
-        return true;
+        return this._shouldQueryAll() ?
+            test(subdir) :
+            subdir.indexOf('/') === -1 && test(subdir)
       }
 
       _relPath (path) {
@@ -342,6 +367,37 @@ limitations under the License.
 
       _updateQueryState () {
         this._navigateTo(this.path, this.query)
+      }
+
+      _currentNodeChanged () {
+        // Set search placeholder according to whether or not this is the
+        // root directory.
+        const root = this.shadowRoot || this
+        const e = root.querySelector('.query')
+        if (!e) {
+          return
+        }
+        if (this._shouldQueryAll()) {
+          e.setAttribute(
+            'placeholder',
+            'Search test files, like cors/allow-headers.htm')
+        } else {
+          e.setAttribute(
+              'placeholder',
+              'Search direct sub-folders and test files')
+        }
+      }
+
+      _computeCurrentNode (allMetrics, path) {
+        if (!allMetrics || !path || path === '/') {
+          return null
+        }
+        const currentNode = allMetrics.data.filter(node => node.dir === path)[0]
+        return currentNode || null
+      }
+
+      _shouldQueryAll () {
+        return this.currentNode && this.currentNode.total < 10000 || false
       }
     }
 
