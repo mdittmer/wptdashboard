@@ -250,9 +250,10 @@ limitations under the License.
           return
         }
         this.path = path
-
         // Clear query when navigating to a new path.
-        this._navigateTo(this.path, '')
+        this.query = ''
+
+        this._navigateTo(this.path, this.query)
 
         // Send Google Analytics pageview event
         if ('ga' in window) {
@@ -310,10 +311,11 @@ limitations under the License.
         if (dir.indexOf(path) !== 0) {
           return false;
         }
-        if (dir.substr(path.length).indexOf('/') !== -1) {
+        const subdir = dir.substr(path.length)
+        if (subdir.indexOf('/') !== -1) {
           return false;
         }
-        if (query && dir.indexOf(query) === -1) {
+        if (query && subdir.indexOf(query) === -1) {
           return false;
         }
         return true;
