@@ -124,7 +124,9 @@ limitations under the License.
       <template is="dom-if" if="{{ !pathIsATestFile }}">
         <input
           value="{{ query::input }}"
-          class="query">
+          class="query"
+          placeholder="{{ queryPlaceholder }}"
+          data-foo="bar">
       </template>
       <div class="path">
         <a href="/metrics/" on-click="_navigate">WPT</a>
@@ -220,7 +222,6 @@ limitations under the License.
           },
           currentNode: {
             type: Object,
-            observer: '_currentNodeChanged',
             computed: '_computeCurrentNode(allMetrics, path)'
           },
           query: {
@@ -236,10 +237,14 @@ limitations under the License.
             type: Array,
             computed: '_computeThLabels(allMetrics)'
           },
+          queryPlaceholder: {
+            type: String,
+            computed: '_computeQueryPlaceholder(currentNode)'
+          },
           _queryTimeoutId: {
             type: Number,
             value: 0
-          }
+          },
         }
       }
 
@@ -398,22 +403,11 @@ limitations under the License.
         this._navigateState({path: this.path, query: this.query})
       }
 
-      _currentNodeChanged () {
-        // Set search placeholder according to whether or not this is the
-        // root directory.
-        const root = this.shadowRoot || this
-        const e = root.querySelector('.query')
-        if (!e) {
-          return
-        }
+      _computeQueryPlaceholder (currentNode) {
         if (this._shouldQueryAll()) {
-          e.setAttribute(
-            'placeholder',
-            'Search test files, like cors/allow-headers.htm')
+          return 'Search test files, like cors/allow-headers.htm'
         } else {
-          e.setAttribute(
-              'placeholder',
-              'Search direct sub-folders and test files')
+          return 'Search direct sub-folders and test files'
         }
       }
 
