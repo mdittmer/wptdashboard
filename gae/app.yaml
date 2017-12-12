@@ -18,6 +18,10 @@ api_version: go1
 builtins:
 - remote_api: on
 
+skip_files:
+- ^static/wptd/.*$
+- ^static/wptd-metrics/.*$
+
 handlers:
 - url: /components
   static_dir: components
