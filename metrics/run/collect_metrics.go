@@ -185,7 +185,7 @@ func main() {
 	passRateGCSPath := fmt.Sprintf("%s/%s.json.gz", gcsDir,
 		passRatesBasename)
 	passRatesUrl := fmt.Sprintf(
-		"https://storage.cloud.google.com/%s/%s",
+		"https://storage.googleapis.com/%s/%s",
 		*outputGcsBucket,
 		passRateGCSPath)
 	failuresBasenamef := func(browserName string) string {
@@ -197,7 +197,7 @@ func main() {
 	}
 	failuresUrlf := func(browserName string) string {
 		return fmt.Sprintf(
-			"https://storage.cloud.google.com/%s/%s",
+			"https://storage.googleapis.com/%s/%s",
 			*outputGcsBucket,
 			failuresGCSPathf(browserName))
 	}
