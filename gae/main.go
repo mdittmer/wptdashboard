@@ -21,7 +21,7 @@ import (
 	"google.golang.org/appengine"
 )
 
-var templates = template.Must(template.ParseGlob("../templates/*.html"))
+var templates = template.Must(template.ParseGlob("templates/*.html"))
 
 // TODO: Figure out how to access Datastore during app init phase to avoid
 // need for lazy-load-on-first-request.
@@ -58,5 +58,6 @@ func init() {
 	http.HandleFunc("/api/runs", decorate(apiTestRunsHandler))
 	http.HandleFunc("/api/run", decorate(apiTestRunHandler))
 	http.HandleFunc("/results", decorate(resultsRedirectHandler))
+	http.HandleFunc("/metrics/", decorate(metricsHandler))
 	http.HandleFunc("/", decorate(testHandler))
 }
