@@ -30,10 +30,10 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/datastore"
 	gcs "cloud.google.com/go/storage"
-	base "github.com/w3c/wptdashboard"
 	"github.com/w3c/wptdashboard/metrics"
 	"github.com/w3c/wptdashboard/metrics/compute"
 	"github.com/w3c/wptdashboard/metrics/storage"
+	base "github.com/w3c/wptdashboard/shared"
 	"golang.org/x/net/context"
 )
 
